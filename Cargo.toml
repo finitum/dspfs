@@ -4,7 +4,20 @@ version = "0.1.0"
 authors = ["Jonathan Donszelmann <jonabent@gmail.com>", "Victor Roest <victor@xirion.net>"]
 edition = "2018"
 
+build = "build.rs"
+
+
+
 [dependencies]
 log = "0.4"
 pretty_env_logger = "0.4"
+dotenv = "0.15.0"
 gotham = "0.4"
+grpcio = "0.4.4"
+protobuf = "2.14.0"
+futures = "0.1.16"
+
+[build-dependencies]
+protoc-grpcio = "1.2.0"
+walkdir = "2.3.1"
+protobuf-codegen = "2.14.0"

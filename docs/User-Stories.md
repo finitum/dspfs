@@ -74,3 +74,15 @@ We follow the format of [behavior-driven development](http://dannorth.net/whats-
         
 
 #### Story 2: Adding to folder group
+
+    As a user of dspfs,  
+     I want to add files to the group  
+    So that other people can use them.
+    
+    Scenario 1.1: Simple successful 
+        Given that I have a file
+         and  I place it in the designated directory
+         and  *some* other user wants it
+        When  They select it to be downloaded 
+        Then  I upload the file
+         and  they can now distribute the file to others in the group as well 
