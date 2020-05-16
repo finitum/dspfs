@@ -1,10 +1,10 @@
 use crate::node::error::NodeError;
-use std::sync::{Arc, Mutex};
-use tokio::net::{ToSocketAddrs, TcpStream};
-use std::mem;
-use tokio::sync::mpsc::{Sender, channel};
 use crate::node::server::Server;
+use std::mem;
+use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
+use tokio::net::{TcpStream, ToSocketAddrs};
+use tokio::sync::mpsc::{channel, Sender};
 
 mod error;
 mod server;
@@ -13,7 +13,7 @@ mod state;
 enum ServerState {
     Started(Sender<()>),
     Unstarted(Server),
-    Stopped
+    Stopped,
 }
 
 pub struct Node {
@@ -34,6 +34,8 @@ impl Node {
     }
 
     pub async fn send(&self, addr: impl ToSocketAddrs) -> Result<(), NodeError> {
+        // just sends hello world to an address for now.
+
         let mut sock = TcpStream::connect(addr).await?;
 
         sock.write_all(b"hello world!").await?;
@@ -54,13 +56,11 @@ impl Node {
                 } else {
                     unreachable!()
                 }
-            },
+            }
             ServerState::Unstarted(_) => {
                 Err("Can't stop server because it hasn't yet been started".into())
-            },
-            ServerState::Stopped => {
-                Err("Can't stop server because already stopped".into())
-            },
+            }
+            ServerState::Stopped => Err("Can't stop server because already stopped".into()),
         }
     }
 
@@ -71,18 +71,20 @@ impl Node {
                 Err("Couldn't start server because it was already started.".into())
             },
             s @ ServerState::Unstarted(_) => {
-                let (sender, stopper) = channel(2);
+                // This creates a channel which upon receiving something will stop the server.
+                let (tx, rx) = channel(2);
 
-                if let ServerState::Unstarted(server) = mem::replace(s, ServerState::Started(sender)) {
-                    server.start(self.state.clone(), stopper).await;
+                if let ServerState::Unstarted(server) = mem::replace(s, ServerState::Started(tx)) {
+                    server.start(self.state.clone(), rx).await;
 
                     Ok(())
                 } else {
+                    // Unreachable because we have already matched tobe sure thathe type is Unstarted
                     unreachable!()
                 }
             },
             ServerState::Stopped => {
-                Err("Couldn't start server because it was already stopped. A server may only be started once unless it's reset.".into())
+                Err("Couldn't start server because it was already stopped. A server may only be started once.".into())
             },
         }
     }
@@ -90,9 +92,9 @@ impl Node {
 
 #[cfg(test)]
 pub mod tests {
+    use crate::init;
     use crate::node::Node;
     use tokio::time::{delay_for, Duration};
-    use crate::init;
 
     #[tokio::test]
     pub async fn test_simple_stream() {
@@ -103,7 +105,6 @@ pub mod tests {
 
         n1.start_server().await.unwrap();
         n2.start_server().await.unwrap();
-
 
         delay_for(Duration::from_secs_f64(0.5)).await;
 

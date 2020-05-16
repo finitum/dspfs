@@ -1,9 +1,10 @@
+#![allow(dead_code)]
+
 use log::*;
-use dotenv;
 use std::error::Error;
 
-mod protos;
 mod node;
+mod protos;
 mod user;
 
 fn init() {
