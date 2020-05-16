@@ -1,4 +1,4 @@
-use crate::node::error::NodeError;
+use crate::error::DspfsError;
 use crate::node::state::State;
 use log::error;
 use log::*;
@@ -15,7 +15,7 @@ pub struct Server {
 
 impl Server {
     // Creates a server struct with the tcplistener
-    pub async fn new(addr: impl ToSocketAddrs) -> Result<Self, NodeError> {
+    pub async fn new(addr: impl ToSocketAddrs) -> Result<Self, DspfsError> {
         Ok(Server {
             listener: TcpListener::bind(&addr).await?,
         })
@@ -38,7 +38,7 @@ impl Server {
         &mut self,
         state: Arc<Mutex<State>>,
         stopper: &mut Receiver<()>,
-    ) -> Result<(), NodeError> {
+    ) -> Result<(), DspfsError> {
         info!("Now accepting requests");
 
         loop {
@@ -68,7 +68,7 @@ impl Server {
         _state: Arc<Mutex<State>>,
         mut stream: TcpStream,
         addr: SocketAddr,
-    ) -> Result<(), NodeError> {
+    ) -> Result<(), DspfsError> {
         info!("Got a request from {:?}", addr);
         let mut res = Vec::new();
 

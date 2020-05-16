@@ -3,8 +3,10 @@
 use log::*;
 use std::error::Error;
 
+mod error;
+mod message;
 mod node;
-mod protos;
+mod store;
 mod user;
 
 fn init() {
@@ -18,6 +20,8 @@ fn init() {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     init();
+
+    let _store = store::inmemory::InMemory::default();
 
     // Run program
     info!("Hello world!");

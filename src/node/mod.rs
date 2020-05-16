@@ -1,12 +1,13 @@
-use crate::node::error::NodeError;
+use crate::error::DspfsError;
+use crate::message::Message;
 use crate::node::server::Server;
+use crate::user::PublicUser;
 use std::mem;
 use std::sync::{Arc, Mutex};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::sync::mpsc::{channel, Sender};
 
-mod error;
 mod server;
 mod state;
 
@@ -24,7 +25,7 @@ pub struct Node {
 
 impl Node {
     // new server
-    pub async fn new(addr: impl ToSocketAddrs) -> Result<Self, NodeError> {
+    pub async fn new(addr: impl ToSocketAddrs) -> Result<Self, DspfsError> {
         let server = Server::new(addr).await?;
 
         Ok(Self {
@@ -33,7 +34,7 @@ impl Node {
         })
     }
 
-    pub async fn send(&self, addr: impl ToSocketAddrs) -> Result<(), NodeError> {
+    pub async fn send_hello_world(&self, addr: impl ToSocketAddrs) -> Result<(), DspfsError> {
         // just sends hello world to an address for now.
 
         let mut sock = TcpStream::connect(addr).await?;
@@ -43,8 +44,12 @@ impl Node {
         Ok(())
     }
 
+    pub async fn send(&self, _to: PublicUser, _message: impl Message) -> Result<(), DspfsError> {
+        todo!()
+    }
+
     /// Stops the running dspfs server.
-    pub async fn stop(&mut self) -> Result<(), NodeError> {
+    pub async fn stop(&mut self) -> Result<(), DspfsError> {
         match &mut self.server {
             s @ ServerState::Started(_) => {
                 if let ServerState::Started(mut stopper) = mem::replace(s, ServerState::Stopped) {
@@ -65,7 +70,7 @@ impl Node {
     }
 
     /// Starts the dspfs server.
-    pub async fn start_server(&mut self) -> Result<(), NodeError> {
+    pub async fn start_server(&mut self) -> Result<(), DspfsError> {
         match &mut self.server {
             ServerState::Started(_) => {
                 Err("Couldn't start server because it was already started.".into())
@@ -108,7 +113,7 @@ pub mod tests {
 
         delay_for(Duration::from_secs_f64(0.5)).await;
 
-        n1.send("localhost:8124").await.unwrap();
+        n1.send_hello_world("localhost:8124").await.unwrap();
 
         delay_for(Duration::from_secs_f64(0.5)).await;
 
