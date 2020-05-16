@@ -5,7 +5,7 @@ use std::ffi::OsStr;
 use protobuf_codegen::Customize;
 
 fn main() {
-    let proto_root = "src/api";
+    let proto_root = "src/protos";
 
     let dirs = walkdir::WalkDir::new(proto_root)
         .into_iter()
