@@ -7,6 +7,8 @@ pub enum DspfsError {
     NotFoundInStore(String),
     RingKeyRejectedError(ring::error::KeyRejected),
     RingKeyUnspecifiedError(ring::error::Unspecified),
+    InvalidEncryptedConnectionInitialization,
+    BincodeError(Box<bincode::ErrorKind>),
 }
 
 impl From<io::Error> for DspfsError {
@@ -36,5 +38,11 @@ impl From<ring::error::KeyRejected> for DspfsError {
 impl From<ring::error::Unspecified> for DspfsError {
     fn from(e: ring::error::Unspecified) -> Self {
         DspfsError::RingKeyUnspecifiedError(e)
+    }
+}
+
+impl From<Box<bincode::ErrorKind>> for DspfsError {
+    fn from(e: Box<bincode::ErrorKind>) -> Self {
+        DspfsError::BincodeError(e)
     }
 }

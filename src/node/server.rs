@@ -1,10 +1,10 @@
 use crate::error::DspfsError;
-use crate::node::state::State;
+use crate::store::Store;
 use log::error;
 use log::*;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
-use tokio::io::AsyncReadExt;
+use std::sync::{Arc, RwLock};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::Receiver;
@@ -23,7 +23,7 @@ impl Server {
 
     // Starts listening for requests
     // contains a loop checking for errors
-    pub async fn start(mut self, state: Arc<Mutex<State>>, mut stopper: Receiver<()>) {
+    pub async fn start(mut self, state: Arc<RwLock<dyn Store>>, mut stopper: Receiver<()>) {
         info!("Starting server");
         // Outer loop for catching errors
         tokio::spawn(async move {
@@ -36,7 +36,7 @@ impl Server {
     // Inner loop for receiving messages and calling on [process]
     async fn internal_start(
         &mut self,
-        state: Arc<Mutex<State>>,
+        state: Arc<RwLock<dyn Store>>,
         stopper: &mut Receiver<()>,
     ) -> Result<(), DspfsError> {
         info!("Now accepting requests");
@@ -50,11 +50,11 @@ impl Server {
                 accepted = self.listener.accept() => {
                     // Normal message
                     let (stream, addr) = accepted?;
-                    let local_state = state.clone();
+                    let local_store = state.clone();
 
                     // process the message
                     tokio::spawn(async move {
-                        if let Err(e) = Self::process(local_state, stream, addr).await {
+                        if let Err(e) = process(local_store, stream, addr).await {
                             error!("an error occurred; error = {:?}", e);
                         }
                     });
@@ -62,21 +62,25 @@ impl Server {
             }
         }
     }
+}
 
-    // Actually process the incoming requests
-    async fn process(
-        _state: Arc<Mutex<State>>,
-        mut stream: TcpStream,
-        addr: SocketAddr,
-    ) -> Result<(), DspfsError> {
-        info!("Got a request from {:?}", addr);
-        let mut res = Vec::new();
+// Actually process the incoming requests
+async fn process(
+    state: Arc<RwLock<dyn Store>>,
+    mut stream: TcpStream,
+    addr: SocketAddr,
+) -> Result<(), DspfsError> {
+    info!("Got a request from {:?}", addr);
+    let mut res = Vec::new();
 
-        stream.read_to_end(&mut res).await?;
 
-        // TODO: Actually do something instead of printing
-        info!("Contents: {:?}", String::from_utf8_lossy(&res));
 
-        Ok(())
-    }
+    stream.read_to_end(&mut res).await?;
+    info!("Contents: {:?}", String::from_utf8_lossy(&res));
+
+    stream.write(b"Test").await?;
+
+    // Check type of message
+
+    Ok(())
 }

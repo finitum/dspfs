@@ -1,9 +1,10 @@
 use crate::error::DspfsError;
 use crate::message::Message;
 use crate::node::server::Server;
+use crate::store::Store;
 use crate::user::PublicUser;
 use std::mem;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::sync::mpsc::{channel, Sender};
@@ -20,17 +21,20 @@ enum ServerState {
 pub struct Node {
     /// This option becomes None once the server is started.
     server: ServerState,
-    state: Arc<Mutex<state::State>>,
+    state: Arc<RwLock<dyn Store>>,
 }
 
 impl Node {
     // new server
-    pub async fn new(addr: impl ToSocketAddrs) -> Result<Self, DspfsError> {
+    pub async fn new<T: Store + 'static>(
+        addr: impl ToSocketAddrs,
+        store: T,
+    ) -> Result<Self, DspfsError> {
         let server = Server::new(addr).await?;
 
         Ok(Self {
             server: ServerState::Unstarted(server),
-            state: Arc::new(Mutex::new(state::State::new())),
+            state: Arc::new(RwLock::new(store)),
         })
     }
 
@@ -39,12 +43,14 @@ impl Node {
 
         let mut sock = TcpStream::connect(addr).await?;
 
+        // let encrypted_sock = EncryptedStream::from(sock);
+
         sock.write_all(b"hello world!").await?;
 
         Ok(())
     }
 
-    pub async fn send(&self, _to: PublicUser, _message: impl Message) -> Result<(), DspfsError> {
+    pub async fn send(&self, _to: PublicUser, _message: Message) -> Result<(), DspfsError> {
         todo!()
     }
 
@@ -99,14 +105,18 @@ impl Node {
 pub mod tests {
     use crate::init;
     use crate::node::Node;
+    use crate::store::inmemory::InMemory;
     use tokio::time::{delay_for, Duration};
 
     #[tokio::test]
     pub async fn test_simple_stream() {
         init();
 
-        let mut n1 = Node::new("0.0.0.0:8123").await.unwrap();
-        let mut n2 = Node::new("0.0.0.0:8124").await.unwrap();
+        let store1 = InMemory::default();
+        let store2 = InMemory::default();
+
+        let mut n1 = Node::new("0.0.0.0:8123", store1).await.unwrap();
+        let mut n2 = Node::new("0.0.0.0:8124", store2).await.unwrap();
 
         n1.start_server().await.unwrap();
         n2.start_server().await.unwrap();

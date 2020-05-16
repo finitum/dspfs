@@ -1,14 +1,14 @@
 use crate::user::PublicKey;
 use std::net::IpAddr;
 
+type SymmetricKey = u8;
+
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 pub struct PublicUser {
     // ed25519 public key
     public_key: PublicKey,
-    // username(?)
     username: String,
-    // Option<Last known ip>
-    last_ip: Option<IpAddr>, // Option<symmetric key> (when established)
+    last_ip: Option<IpAddr>,
 }
 
 impl PublicUser {

@@ -5,7 +5,7 @@ use ring::signature::Ed25519KeyPair;
 
 pub mod inmemory;
 
-pub trait Store: Default {
+pub trait Store: Send + Sync {
     /// Saves the private user in the store
     fn set_self_user(&mut self, user: PublicUser);
 

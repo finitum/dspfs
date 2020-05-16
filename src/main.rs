@@ -3,6 +3,7 @@
 use log::*;
 use std::error::Error;
 
+mod encryptedstream;
 mod error;
 mod message;
 mod node;

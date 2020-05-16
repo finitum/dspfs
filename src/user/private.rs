@@ -2,6 +2,7 @@ use crate::error::DspfsError;
 use crate::user::{PublicKey, PublicUser};
 use ring::pkcs8::Document;
 use ring::rand;
+use ring::signature::Ed25519KeyPair;
 use std::ops::{Deref, DerefMut};
 
 pub struct PrivateUser {
@@ -26,6 +27,10 @@ impl PrivateUser {
             },
             pkcs8_bytes,
         ))
+    }
+
+    pub fn get_keypair(&self) -> &Ed25519KeyPair {
+        &self.keypair
     }
 
     pub fn public_user(&self) -> &PublicUser {
