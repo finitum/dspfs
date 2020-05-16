@@ -101,8 +101,8 @@ Cargo.lock
 
 # Proto
 
-src/api/*.rs
-!src/api/mod.rs
+src/protos/*.rs
+!src/protos/mod.rs
 
 # End of https://www.gitignore.io/api/rust,intellij+all
 

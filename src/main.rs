@@ -1,15 +1,26 @@
+#![allow(dead_code)]
+
 use log::*;
-use dotenv;
+use std::error::Error;
 
-mod api;
+mod node;
+mod protos;
+mod user;
 
-pub fn main() {
+fn init() {
     // Load environment variables from .env file
     dotenv::dotenv().unwrap();
 
     // Init program
     pretty_env_logger::init();
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    init();
 
     // Run program
     info!("Hello world!");
+
+    Ok(())
 }

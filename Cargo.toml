@@ -12,10 +12,14 @@ build = "build.rs"
 log = "0.4"
 pretty_env_logger = "0.4"
 dotenv = "0.15.0"
-gotham = "0.4"
 grpcio = "0.4.4"
 protobuf = "2.14.0"
 futures = "0.1.16"
+bincode = "1.2.1"
+serde = {version = "1.0.110", features=["derive"]}
+tokio = {version = "0.2.20", features=["full"]}
+
+#gotham = "0.4"
 
 [build-dependencies]
 protoc-grpcio = "1.2.0"
