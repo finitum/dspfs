@@ -13,7 +13,7 @@ pub enum DspfsError {
     BincodeError(Box<bincode::ErrorKind>),
     BadSignature,
     InvalidMessage,
-    ChannelSendError(String)
+    ChannelSendError(String),
 }
 
 impl From<io::Error> for DspfsError {

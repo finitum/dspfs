@@ -1,8 +1,8 @@
 use crate::error::DspfsError;
 use crate::message::Message;
+use crate::stream::encryptedstream::EncryptedStream;
 use crate::user::PrivateUser;
 use tokio::net::{TcpStream, ToSocketAddrs};
-use crate::stream::encryptedstream::EncryptedStream;
 
 pub struct Client {
     stream: EncryptedStream<TcpStream>,

@@ -3,10 +3,10 @@
 use log::*;
 use std::error::Error;
 
-mod stream;
 mod error;
 mod message;
 mod store;
+mod stream;
 mod user;
 
 fn init() {

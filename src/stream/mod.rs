@@ -1,6 +1,5 @@
-
-mod encryptedstream;
 mod client;
+mod encryptedstream;
 mod server;
 
 pub use client::Client;

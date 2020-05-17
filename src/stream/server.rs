@@ -1,5 +1,6 @@
 use crate::error::DspfsError;
 use crate::store::SharedStore;
+use crate::stream::encryptedstream::EncryptedStream;
 use crate::user::PrivateUser;
 use log::error;
 use log::*;
@@ -8,7 +9,6 @@ use std::ops::Deref;
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
-use crate::stream::encryptedstream::EncryptedStream;
 
 pub struct Server {
     listener: TcpListener,
@@ -107,9 +107,9 @@ pub mod tests {
     use crate::message::Message;
     use crate::store::inmemory::InMemory;
     use crate::store::Store;
+    use crate::stream::{Client, Server};
     use crate::user::PrivateUser;
     use tokio::time::{delay_for, Duration};
-    use crate::stream::{Client, Server};
 
     #[tokio::test]
     pub async fn test_simple_stream() {

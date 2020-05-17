@@ -11,7 +11,6 @@ pub struct PublicKey(pub(self) Vec<u8>);
 impl PublicKey {
     pub fn ring(&self) -> UnparsedPublicKey<&[u8]> {
         UnparsedPublicKey::new(&ED25519, &self.0)
-
     }
 }
 
