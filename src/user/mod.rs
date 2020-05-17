@@ -3,10 +3,17 @@ mod public;
 
 pub use private::PrivateUser;
 pub use public::PublicUser;
-use ring::signature::{Ed25519KeyPair, KeyPair};
+use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey, ED25519};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq, Debug)]
 pub struct PublicKey(pub(self) Vec<u8>);
+
+impl PublicKey {
+    pub fn ring(&self) -> UnparsedPublicKey<&[u8]> {
+        UnparsedPublicKey::new(&ED25519, &self.0)
+
+    }
+}
 
 impl From<Vec<u8>> for PublicKey {
     fn from(v: Vec<u8>) -> Self {

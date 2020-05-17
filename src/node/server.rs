@@ -66,21 +66,19 @@ impl Server {
 
 // Actually process the incoming requests
 async fn process(
-    state: Arc<RwLock<dyn Store>>,
+    _state: Arc<RwLock<dyn Store>>,
     mut stream: TcpStream,
     addr: SocketAddr,
 ) -> Result<(), DspfsError> {
     info!("Got a request from {:?}", addr);
     let mut res = Vec::new();
 
-
-
     stream.read_to_end(&mut res).await?;
     info!("Contents: {:?}", String::from_utf8_lossy(&res));
 
     stream.write(b"Test").await?;
 
-    // Check type of message
+    // Check type of messagep
 
     Ok(())
 }
