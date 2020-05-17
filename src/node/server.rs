@@ -73,8 +73,6 @@ async fn process(
     info!("Got a request from {:?}", addr);
     let mut res = Vec::new();
 
-
-
     stream.read_to_end(&mut res).await?;
     info!("Contents: {:?}", String::from_utf8_lossy(&res));
 

@@ -8,50 +8,107 @@ use ring::aead::{
 use ring::error::Unspecified;
 use ring::pbkdf2::*;
 use ring::rand::{SecureRandom, SystemRandom};
-use ring::signature::Ed25519KeyPair;
 use std::num::NonZeroU32;
-use std::task::Context;
 use tokio::io;
-use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::macros::support::{Pin, Poll};
-use tokio::net::TcpStream;
-use tokio::prelude::AsyncRead;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use x25519_dalek::EphemeralSecret;
 use x25519_dalek::PublicKey;
+use std::fmt::Debug;
+use serde::export::Formatter;
+use std::fmt;
+use async_trait::async_trait;
 
-pub struct EncryptedStream {
-    stream: TcpStream,
-    other_user: PublicUser,
-
-    opening_key: OpeningKey<NonceGenerator>,
-    sealing_key: SealingKey<NonceGenerator>,
+#[async_trait]
+trait WriteWithLength {
+    async fn write_with_length(&mut self, bytes: &[u8]) -> io::Result<()>;
 }
 
-impl EncryptedStream {
-    pub async fn initiator(mut stream: TcpStream, user: PrivateUser) -> Result<Self, DspfsError> {
+#[async_trait]
+impl<T: AsyncWriteExt + Unpin + Send + Sync> WriteWithLength for T {
+    async fn write_with_length(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.write_u64(bytes.len() as u64).await?;
+        self.write_all(bytes).await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+trait ReadWithLength {
+    /// Reads a message with a length specified in the message.
+    /// This length is blindly trusted, and therefore is quite dangerous.
+    async fn read_with_length(&mut self) -> io::Result<Vec<u8>> {
+        self.read_with_length_limited(0).await
+    }
+
+    /// Reads a message with a length specified in the message.
+    /// Aborts reading when the message length is larger than the limit.
+    /// A limit of 0 means no limit. This function is much safer than read_with_length.
+    async fn read_with_length_limited(&mut self, limit: usize) -> io::Result<Vec<u8>>;
+}
+
+#[async_trait]
+impl<T: AsyncReadExt + Unpin + Send + Sync> ReadWithLength for T {
+    async fn read_with_length_limited(&mut self, limit: usize) -> io::Result<Vec<u8>> {
+        let mut res = Vec::new();
+
+        let mut length = self.read_u64().await?;
+
+        if length as usize > limit && limit != 0 {
+            return Err(io::ErrorKind::Interrupted.into())
+        }
+
+        while length > 0 {
+            let size = length.min(1024);
+            length -= size;
+            let mut buf = vec![0u8; size as usize];
+
+            self.read_exact(&mut buf).await?;
+            res.extend_from_slice(&buf)
+        }
+
+        Ok(res)
+    }
+}
+
+
+pub struct EncryptedStream<T: AsyncReadExt + AsyncWriteExt + Unpin> {
+    stream: T,
+    other_user: PublicUser,
+
+    pub(self) opening_key: OpeningKey<NonceGenerator>,
+    pub(self) sealing_key: SealingKey<NonceGenerator>,
+}
+
+impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> Debug for EncryptedStream<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "EncryptedStream{{user: {:?}}}", self.other_user)
+    }
+}
+
+impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
+    pub async fn initiator(mut stream: T, user: PrivateUser) -> Result<Self, DspfsError> {
         // TODO: Maybe switch to ring for DH
         // TODO: Refactor to be independent from TcpStream
 
         let our_partial_secret = EphemeralSecret::new(&mut rand_core::OsRng);
         let our_pubkey = PublicKey::from(&our_partial_secret);
 
-        let msg = Message::Init {
+        let our_init_msg = Message::Init {
             user: user.public_user().to_owned(),
             pubkey: our_pubkey,
         };
 
-        let signedmsg = msg.sign(user.get_keypair())?.serialize()?;
+        let signedmsg = our_init_msg.sign(user.get_keypair())?.serialize()?;
 
-        stream.write(&signedmsg).await?;
+        // Send a message to the user we want to connect to to initiate the Diffie Helmann exchange
+        stream.write_with_length(&signedmsg).await?;
 
-        let mut reply = Vec::new();
-        stream.read_to_end(&mut reply).await?;
+        // Deserialize the message we get back
+        let other_init_message = Self::read_signed_message(&mut stream).await?;
+        let other_user_signed_message: Message = bincode::deserialize(&other_init_message.message)?;
 
-        let other_init: SignedMessage = bincode::deserialize(&reply)?;
-
-        let other_user_message: Message = bincode::deserialize(&other_init.message)?;
-
-        let (shared_secret, other_user) = match other_user_message {
+        // Extract message parts and apply diffie hellman to create a shared secret
+        let (shared_secret, other_user) = match other_user_signed_message {
             Message::Init {
                 user,
                 pubkey: other_pubkey,
@@ -59,12 +116,18 @@ impl EncryptedStream {
             _ => Err(DspfsError::InvalidEncryptedConnectionInitialization)?,
         };
 
+        // Check signature when we know their public key
+        other_user.get_public_key().ring().verify(&other_init_message.message, &other_init_message.signature)
+            .map_err(|_| DspfsError::BadSignature)?;
+
         // TODO: Less hardcoding of thingies
 
+        // Derive our actual symmetric keys so we can have encrypted communication
         // WATCH OUT: REVERSE USERNAMES ON RECEIVING SIDE TO MAKE EQUAL SALTS
         let mut salt = user.get_username().clone();
         salt.push_str(other_user.get_username());
-        let mut shared_key = Vec::new();
+        let mut shared_key = [0; 32];
+        // TODO: Derive may panic, maybe check for this?
         derive(
             PBKDF2_HMAC_SHA256,
             // DO NOT MAKE 0
@@ -73,6 +136,8 @@ impl EncryptedStream {
             shared_secret.as_bytes(),
             &mut shared_key,
         );
+
+        println!("{:?}", shared_key);
 
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
@@ -91,39 +156,89 @@ impl EncryptedStream {
         })
     }
 
-    pub fn receiver(_stream: TcpStream, _keypair: Ed25519KeyPair) -> Self {
-        let our_partial_secret1 = EphemeralSecret::new(&mut rand_core::OsRng);
-        let _our_partial_public1 = PublicKey::from(&our_partial_secret1);
-
-        todo!()
-    }
-}
-
-impl AsyncWrite for EncryptedStream {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        unimplemented!()
+    /// Reads one signed message and decodes it. Just to make other functions in this struct a little smaller and more readable.
+    async fn read_signed_message(stream: &mut T) -> Result<SignedMessage, DspfsError> {
+        let message = stream.read_with_length_limited(1024).await?;
+        Ok(bincode::deserialize(&message)?)
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        unimplemented!()
+    pub async fn receiver(mut stream: T, user: PrivateUser) -> Result<Self, DspfsError> {
+        let signed_init_message = Self::read_signed_message(&mut stream).await?;
+
+        // With the message from the other user, we can start the diffie hellman procedure and
+        // create our own shared secret. However, we have to send something back to them so they
+        // can get this secret as well
+        let init_message: Message = bincode::deserialize(&signed_init_message.message)?;
+
+        let our_partial_secret = EphemeralSecret::new(&mut rand_core::OsRng);
+        let our_pubkey = PublicKey::from(&our_partial_secret);
+
+        // Extract message parts and apply diffie hellman to create a shared secret
+        let (shared_secret, other_user) = match init_message {
+            Message::Init {
+                user,
+                pubkey: other_pubkey,
+            } => (our_partial_secret.diffie_hellman(&other_pubkey), user),
+            _ => Err(DspfsError::InvalidEncryptedConnectionInitialization)?,
+        };
+
+        // Check signature when we know their public key
+        // TODO: Don't get this public key from the message but instead from the store.
+        other_user.get_public_key().ring().verify(&signed_init_message.message, &signed_init_message.signature)
+            .map_err(|_| DspfsError::BadSignature)?;
+
+        // Now we know the identity of the other user, send something back
+        let our_init_msg = Message::Init {
+            user: user.public_user().to_owned(),
+            pubkey: our_pubkey,
+        };
+        let signedmsg = our_init_msg.sign(user.get_keypair())?.serialize()?;
+        stream.write_with_length(&signedmsg).await?;
+
+        // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
+        //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
+        //       the other user's name as opener?
+        let mut salt = other_user.get_username().clone();
+        salt.push_str(user.get_username());
+        let mut shared_key = [0; 32];
+        // TODO: Derive may panic, maybe check for this?
+        derive(
+            PBKDF2_HMAC_SHA256,
+            // DO NOT MAKE 0
+            NonZeroU32::new(42u32).unwrap(),
+            salt.as_bytes(),
+            shared_secret.as_bytes(),
+            &mut shared_key,
+        );
+
+
+
+        println!("{:?}", shared_key);
+        // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
+        //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
+        //       the other user's name as opener?
+        let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
+        let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
+
+        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator);
+        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator);
+
+        Ok(Self {
+            stream,
+            other_user,
+            opening_key,
+            sealing_key,
+        })
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        unimplemented!()
-    }
-}
+    pub fn send_message(&self, message: Message) -> Result<(), DspfsError> {
 
-impl AsyncRead for EncryptedStream {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut [u8],
-    ) -> Poll<io::Result<usize>> {
-        unimplemented!()
+        Ok(())
+    }
+
+    pub fn recv_message(&self) -> Result<Message, DspfsError>  {
+
+        Ok(Message::Yeet)
     }
 }
 
@@ -144,8 +259,13 @@ impl NonceSequence for NonceGenerator {
 
 #[cfg(test)]
 mod tests {
-    use crate::encryptedstream::NonceGenerator;
+    use crate::encryptedstream::{NonceGenerator, EncryptedStream};
     use ring::aead::NonceSequence;
+    use crate::user::PrivateUser;
+    use tokio::net::{TcpStream, TcpListener};
+    use tokio::time::{delay_for, Duration};
+    use crate::init;
+    use log::*;
 
     #[test]
     fn test_not_0_nonce() {
@@ -161,5 +281,36 @@ mod tests {
         let b = n.advance().unwrap();
 
         assert_ne!(a.as_ref(), b.as_ref())
+    }
+
+    #[tokio::test]
+    async fn test_encrypted_stream() {
+        init();
+
+        let (u1, _) = PrivateUser::new("test1").unwrap();
+        let (u2, _) = PrivateUser::new("test2").unwrap();
+
+        tokio::spawn(async move {
+            info!("Start listening");
+
+            let mut listener = TcpListener::bind("localhost:8984").await.unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
+
+            info!("Got connection");
+
+            let er = EncryptedStream::receiver(stream, u2).await.unwrap();
+
+            // dbg!(er);
+        });
+
+        delay_for(Duration::from_secs_f64(0.5)).await;
+
+        info!("Sending");
+
+        let sock = TcpStream::connect("localhost:8984").await.unwrap();
+        let es = EncryptedStream::initiator(sock,u1).await.unwrap();
+
+        // dbg!(es);
+
     }
 }

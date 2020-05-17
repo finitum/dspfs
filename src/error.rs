@@ -9,6 +9,8 @@ pub enum DspfsError {
     RingKeyUnspecifiedError(ring::error::Unspecified),
     InvalidEncryptedConnectionInitialization,
     BincodeError(Box<bincode::ErrorKind>),
+    BadSignature,
+    InvalidMessage,
 }
 
 impl From<io::Error> for DspfsError {
