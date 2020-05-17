@@ -4,6 +4,7 @@ use log::*;
 use std::error::Error;
 
 mod error;
+mod fs;
 mod message;
 mod store;
 mod stream;

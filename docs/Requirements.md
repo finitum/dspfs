@@ -20,6 +20,7 @@
 * Share files cross groups
 * Distributed database with consensus.
 * Autodownload: Enables downloading all files in the distributed filesystem
+* Hooks: pre-receive/post-receive etc. could call programs when those events happen.
 
 ## Won't have
 
