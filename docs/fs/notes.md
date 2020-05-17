@@ -2,19 +2,19 @@ Per user the filelist
 User : HashMap<UUID,File>
 
 
-files:
-Victor:
-dira
-    fileb.txt uuida
-    
-Jonathan
-dira
-    filea.txt uuida
-    
-ls /:
-    dira:
-        fileb.txt duplicate (option> rename)
-        filea.txt 
+    files:
+    Victor:
+    dira
+        fileb.txt uuida
+        
+    Jonathan
+    dira
+        filea.txt uuida
+        
+    ls /:
+        dira:
+            fileb.txt duplicate (option> rename)
+            filea.txt 
         
 ### resolve conflict:
 * keep mine (do nothing, keep conflict)
@@ -27,7 +27,7 @@ ls /:
 1. Hash
 2. Offset
 3. size
-* Returns Vec\<u8\>
+* Returns Vec\<u8\> (streaming?)
 
 ## Group
 ### Shared Group

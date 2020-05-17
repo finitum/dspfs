@@ -1,13 +1,13 @@
-use crate::fs::local::file::File;
-use crate::fs::shared;
-use std::collections::HashMap;
-use std::path::{PathBuf, Path};
 use crate::error::DspfsError;
 use crate::fs::hash::FileHash;
+use crate::fs::local::file::File;
 use crate::fs::local::ops::FileOps;
-use std::marker::PhantomData;
-use serde::export::fmt::Debug;
+use crate::fs::shared;
 use crate::store::SharedStore;
+use serde::export::fmt::Debug;
+use std::collections::HashMap;
+use std::marker::PhantomData;
+use std::path::{Path, PathBuf};
 
 /// Local representation of a group
 pub struct Group<F: FileOps> {
@@ -21,15 +21,16 @@ pub struct Group<F: FileOps> {
     phantom: PhantomData<F>,
 }
 
-
 impl<F: FileOps> Group<F> {
     pub async fn add_file(&mut self, file: File, store: SharedStore) -> Result<(), DspfsError> {
         let guard = store.read().await;
-        let me = guard.get_self_user()
-            .as_ref()
-            .ok_or(DspfsError::NotFoundInStore("Group::add_file(): Could not find user in store".into()))?;
+        let me = guard.get_self_user().as_ref().ok_or_else(|| {
+            DspfsError::NotFoundInStore("Group::add_file(): Could not find user in store".into())
+        })?;
 
-        self.shared_group.add_file(&me, shared::File::from(&file)).await;
+        self.shared_group
+            .add_file(&me, shared::File::from(&file))
+            .await;
 
         self.hashes.insert(file.hash.clone(), file.path.clone());
         self.files.insert(file.path.clone(), file);
@@ -37,16 +38,16 @@ impl<F: FileOps> Group<F> {
         Ok(())
     }
 
-    pub async fn add_file_from_path(&mut self, file: impl AsRef<Path> + Debug + Send + Sync, store: SharedStore) -> Result<(), DspfsError> {
+    pub async fn add_file_from_path(
+        &mut self,
+        file: impl AsRef<Path> + Debug + Send + Sync,
+        store: SharedStore,
+    ) -> Result<(), DspfsError> {
         let path = file.as_ref().to_path_buf();
         let hash = F::hash(&path).await?;
         let size = F::size(&path).await?;
 
-        self.add_file(File {
-            hash,
-            size,
-            path,
-        }, store).await?;
+        self.add_file(File { hash, size, path }, store).await?;
 
         Ok(())
     }

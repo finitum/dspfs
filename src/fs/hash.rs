@@ -1,5 +1,5 @@
 use ring::digest::{Digest, SHA512};
-use std::hash::{Hasher, Hash};
+use std::hash::{Hash, Hasher};
 
 #[derive(Copy, Clone)]
 pub struct FileHash(Digest);

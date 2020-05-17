@@ -1,11 +1,11 @@
 use crate::fs::hash::FileHash;
-use std::path::PathBuf;
 use crate::fs::local;
+use std::path::PathBuf;
 
 pub struct File {
     hash: FileHash,
     size: u64,
-    path: PathBuf
+    path: PathBuf,
 }
 
 impl From<&local::File> for File {
@@ -13,7 +13,7 @@ impl From<&local::File> for File {
         Self {
             hash: f.hash,
             size: f.size,
-            path: f.path.clone()
+            path: f.path.clone(),
         }
     }
 }
