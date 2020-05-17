@@ -1,4 +1,6 @@
+use serde::export::fmt::Debug;
 use std::io;
+use tokio::sync::mpsc::error::SendError;
 
 #[derive(Debug)]
 pub enum DspfsError {
@@ -11,6 +13,7 @@ pub enum DspfsError {
     BincodeError(Box<bincode::ErrorKind>),
     BadSignature,
     InvalidMessage,
+    ChannelSendError(String)
 }
 
 impl From<io::Error> for DspfsError {
@@ -46,5 +49,11 @@ impl From<ring::error::Unspecified> for DspfsError {
 impl From<Box<bincode::ErrorKind>> for DspfsError {
     fn from(e: Box<bincode::ErrorKind>) -> Self {
         DspfsError::BincodeError(e)
+    }
+}
+
+impl<T> From<SendError<T>> for DspfsError {
+    fn from(e: SendError<T>) -> Self {
+        DspfsError::ChannelSendError(e.to_string())
     }
 }

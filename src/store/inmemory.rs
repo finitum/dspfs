@@ -1,8 +1,10 @@
 use crate::error::DspfsError;
-use crate::store::Store;
+use crate::store::{SharedStore, Store};
 use crate::user::PublicUser;
 use ring::pkcs8::Document;
 use ring::signature::Ed25519KeyPair;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub struct InMemory {
     user: Option<PublicUser>,
@@ -31,8 +33,13 @@ impl Store for InMemory {
         self.signing_key = Some(key)
     }
 
-    fn get_signing_key(self) -> Option<Result<Ed25519KeyPair, DspfsError>> {
+    fn get_signing_key(&self) -> Option<Result<Ed25519KeyPair, DspfsError>> {
         self.signing_key
+            .as_ref()
             .map(|document| Ok(Ed25519KeyPair::from_pkcs8(document.as_ref())?))
+    }
+
+    fn shared(self) -> SharedStore {
+        Arc::new(RwLock::new(Box::new(self)))
     }
 }

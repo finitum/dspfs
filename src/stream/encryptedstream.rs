@@ -84,7 +84,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> Debug for EncryptedS
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
-    pub async fn initiator(mut stream: T, user: PrivateUser) -> Result<Self, DspfsError> {
+    pub async fn initiator(mut stream: T, user: &PrivateUser) -> Result<Self, DspfsError> {
         // TODO: Maybe switch to ring for DH
         // TODO: Refactor to be independent from TcpStream
 
@@ -111,7 +111,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
                 user,
                 pubkey: other_pubkey,
             } => (our_partial_secret.diffie_hellman(&other_pubkey), user),
-            _ => Err(DspfsError::InvalidEncryptedConnectionInitialization)?,
+            _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
         };
 
         // Check signature when we know their public key
@@ -178,7 +178,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
                 user,
                 pubkey: other_pubkey,
             } => (our_partial_secret.diffie_hellman(&other_pubkey), user),
-            _ => Err(DspfsError::InvalidEncryptedConnectionInitialization)?,
+            _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
         };
 
         // Check signature when we know their public key
@@ -267,7 +267,7 @@ impl NonceSequence for NonceGenerator {
 
         let mut bytes = [0u8; NONCE_LEN];
 
-        bytes.copy_from_slice(&self.value.to_be_bytes()[..NONCE_LEN]);
+        bytes.copy_from_slice(&self.value.to_le_bytes()[..NONCE_LEN]);
 
         Ok(Nonce::assume_unique_for_key(bytes))
     }
@@ -275,7 +275,6 @@ impl NonceSequence for NonceGenerator {
 
 #[cfg(test)]
 mod tests {
-    use crate::encryptedstream::{EncryptedStream, NonceGenerator};
     use crate::init;
     use crate::message::Message;
     use crate::user::PrivateUser;
@@ -283,6 +282,7 @@ mod tests {
     use ring::aead::NonceSequence;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::time::{delay_for, Duration};
+    use crate::stream::encryptedstream::{NonceGenerator, EncryptedStream};
 
     #[test]
     fn test_not_0_nonce() {
@@ -319,14 +319,25 @@ mod tests {
 
             let mut er = EncryptedStream::receiver(stream, u2).await.unwrap();
 
-            let rmsg = er.recv_message(0).await.unwrap();
+            let mut rmsg = er.recv_message(0).await.unwrap();
+            match rmsg {
+                Message::String(s) => assert_eq!(s, MSG),
+                _ => unreachable!(),
+            }
+
+            rmsg = er.recv_message(0).await.unwrap();
 
             match rmsg {
                 Message::String(s) => assert_eq!(s, MSG),
-                _ => assert!(false),
+                _ => unreachable!(),
             }
 
-            // dbg!(er);
+            rmsg = er.recv_message(0).await.unwrap();
+
+            match rmsg {
+                Message::String(s) => assert_eq!(s, MSG),
+                _ => unreachable!(),
+            }
         });
 
         delay_for(Duration::from_secs_f64(0.5)).await;
@@ -334,8 +345,10 @@ mod tests {
         info!("Sending");
 
         let sock = TcpStream::connect("localhost:8984").await.unwrap();
-        let mut es = EncryptedStream::initiator(sock, u1).await.unwrap();
+        let mut es = EncryptedStream::initiator(sock, &u1).await.unwrap();
 
+        es.send_message(Message::String(MSG.into())).await.unwrap();
+        es.send_message(Message::String(MSG.into())).await.unwrap();
         es.send_message(Message::String(MSG.into())).await.unwrap();
 
         delay_for(Duration::from_secs_f64(0.5)).await;

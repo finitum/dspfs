@@ -3,10 +3,9 @@
 use log::*;
 use std::error::Error;
 
-mod encryptedstream;
+mod stream;
 mod error;
 mod message;
-mod node;
 mod store;
 mod user;
 
@@ -15,7 +14,7 @@ fn init() {
     dotenv::dotenv().unwrap();
 
     // Init program
-    pretty_env_logger::init();
+    let _ = pretty_env_logger::try_init();
 }
 
 #[tokio::main]
