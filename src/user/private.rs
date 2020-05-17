@@ -40,15 +40,16 @@ impl PrivateUser {
 
     pub fn load_from_store(store: &dyn Store) -> Result<Self, DspfsError> {
         Ok(Self {
-            public_user: store
-                .get_self_user()
-                .clone()
-                .ok_or(DspfsError::NotFoundInStore(
+            public_user: store.get_self_user().clone().ok_or_else(|| {
+                DspfsError::NotFoundInStore(
                     "Could not load private user from store: Self user not found".into(),
-                ))?,
-            keypair: store.get_signing_key().ok_or(DspfsError::NotFoundInStore(
-                "Could not load private user from store: Self user not found".into(),
-            ))??,
+                )
+            })?,
+            keypair: store.get_signing_key().ok_or_else(|| {
+                DspfsError::NotFoundInStore(
+                    "Could not load private user from store: Self user not found".into(),
+                )
+            })??,
         })
     }
 }
