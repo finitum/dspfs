@@ -1,7 +1,7 @@
 use ring::digest::{Digest, SHA512};
 use std::hash::{Hash, Hasher};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct FileHash(Digest);
 
 impl<T: AsRef<[u8]>> From<T> for FileHash {
