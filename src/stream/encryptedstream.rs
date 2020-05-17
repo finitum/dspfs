@@ -277,12 +277,12 @@ impl NonceSequence for NonceGenerator {
 mod tests {
     use crate::init;
     use crate::message::Message;
+    use crate::stream::encryptedstream::{EncryptedStream, NonceGenerator};
     use crate::user::PrivateUser;
     use log::*;
     use ring::aead::NonceSequence;
     use tokio::net::{TcpListener, TcpStream};
     use tokio::time::{delay_for, Duration};
-    use crate::stream::encryptedstream::{NonceGenerator, EncryptedStream};
 
     #[test]
     fn test_not_0_nonce() {
