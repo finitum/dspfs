@@ -66,7 +66,7 @@ impl Server {
 
 // Actually process the incoming requests
 async fn process(
-    state: Arc<RwLock<dyn Store>>,
+    _state: Arc<RwLock<dyn Store>>,
     mut stream: TcpStream,
     addr: SocketAddr,
 ) -> Result<(), DspfsError> {
@@ -78,7 +78,7 @@ async fn process(
 
     stream.write(b"Test").await?;
 
-    // Check type of message
+    // Check type of messagep
 
     Ok(())
 }

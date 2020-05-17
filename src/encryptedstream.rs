@@ -1,22 +1,21 @@
 use crate::error::DspfsError;
 use crate::message::{Message, SignedMessage};
 use crate::user::{PrivateUser, PublicUser};
+use async_trait::async_trait;
 use ring::aead::{
-    BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, CHACHA20_POLY1305,
+    Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, CHACHA20_POLY1305,
     NONCE_LEN,
 };
 use ring::error::Unspecified;
 use ring::pbkdf2::*;
-use ring::rand::{SecureRandom, SystemRandom};
+use serde::export::Formatter;
+use std::fmt;
+use std::fmt::Debug;
 use std::num::NonZeroU32;
 use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use x25519_dalek::EphemeralSecret;
 use x25519_dalek::PublicKey;
-use std::fmt::Debug;
-use serde::export::Formatter;
-use std::fmt;
-use async_trait::async_trait;
 
 #[async_trait]
 trait WriteWithLength {
@@ -54,7 +53,7 @@ impl<T: AsyncReadExt + Unpin + Send + Sync> ReadWithLength for T {
         let mut length = self.read_u64().await?;
 
         if length as usize > limit && limit != 0 {
-            return Err(io::ErrorKind::Interrupted.into())
+            return Err(io::ErrorKind::Interrupted.into());
         }
 
         while length > 0 {
@@ -69,7 +68,6 @@ impl<T: AsyncReadExt + Unpin + Send + Sync> ReadWithLength for T {
         Ok(res)
     }
 }
-
 
 pub struct EncryptedStream<T: AsyncReadExt + AsyncWriteExt + Unpin> {
     stream: T,
@@ -117,7 +115,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         };
 
         // Check signature when we know their public key
-        other_user.get_public_key().ring().verify(&other_init_message.message, &other_init_message.signature)
+        other_user
+            .get_public_key()
+            .ring()
+            .verify(&other_init_message.message, &other_init_message.signature)
             .map_err(|_| DspfsError::BadSignature)?;
 
         // TODO: Less hardcoding of thingies
@@ -137,16 +138,14 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             &mut shared_key,
         );
 
-        println!("{:?}", shared_key);
-
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
         //       the other user's name as opener?
         let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
         let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
 
-        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator);
-        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator);
+        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator::default());
+        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator::default());
 
         Ok(Self {
             stream,
@@ -184,7 +183,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
 
         // Check signature when we know their public key
         // TODO: Don't get this public key from the message but instead from the store.
-        other_user.get_public_key().ring().verify(&signed_init_message.message, &signed_init_message.signature)
+        other_user
+            .get_public_key()
+            .ring()
+            .verify(&signed_init_message.message, &signed_init_message.signature)
             .map_err(|_| DspfsError::BadSignature)?;
 
         // Now we know the identity of the other user, send something back
@@ -211,17 +213,14 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             &mut shared_key,
         );
 
-
-
-        println!("{:?}", shared_key);
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
         //       the other user's name as opener?
         let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
         let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
 
-        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator);
-        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator);
+        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator::default());
+        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator::default());
 
         Ok(Self {
             stream,
@@ -231,52 +230,70 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         })
     }
 
-    pub fn send_message(&self, message: Message) -> Result<(), DspfsError> {
+    pub async fn send_message(&mut self, message: Message) -> Result<(), DspfsError> {
+        let mut serialized_message = bincode::serialize(&message)?;
+        self.sealing_key
+            .seal_in_place_append_tag(Aad::empty(), &mut serialized_message)?;
+
+        self.stream.write_with_length(&serialized_message).await?;
 
         Ok(())
     }
 
-    pub fn recv_message(&self) -> Result<Message, DspfsError>  {
+    pub async fn recv_message(&mut self, limit: usize) -> Result<Message, DspfsError> {
+        let mut msg = self.stream.read_with_length_limited(limit).await?;
 
-        Ok(Message::Yeet)
+        self.opening_key.open_in_place(Aad::empty(), &mut msg)?;
+
+        let dmsg = bincode::deserialize(&msg)?;
+
+        Ok(dmsg)
     }
 }
 
-struct NonceGenerator;
+struct NonceGenerator {
+    value: u128,
+}
+
+impl Default for NonceGenerator {
+    fn default() -> Self {
+        NonceGenerator { value: 0 }
+    }
+}
 
 impl NonceSequence for NonceGenerator {
     fn advance(&mut self) -> Result<Nonce, Unspecified> {
-        // Random data must be used only once per encryption
-        let mut nonce = [0u8; NONCE_LEN];
+        self.value += 1;
 
-        // Fill nonce with random data
-        let rand = SystemRandom::new();
-        rand.fill(&mut nonce)?;
+        let mut bytes = [0u8; NONCE_LEN];
 
-        Ok(Nonce::assume_unique_for_key(nonce))
+        bytes.copy_from_slice(&self.value.to_be_bytes()[..NONCE_LEN]);
+
+        Ok(Nonce::assume_unique_for_key(bytes))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::encryptedstream::{NonceGenerator, EncryptedStream};
-    use ring::aead::NonceSequence;
-    use crate::user::PrivateUser;
-    use tokio::net::{TcpStream, TcpListener};
-    use tokio::time::{delay_for, Duration};
+    use crate::encryptedstream::{EncryptedStream, NonceGenerator};
     use crate::init;
+    use crate::message::Message;
+    use crate::user::PrivateUser;
     use log::*;
+    use ring::aead::NonceSequence;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::{delay_for, Duration};
 
     #[test]
     fn test_not_0_nonce() {
-        let n = NonceGenerator {}.advance().unwrap();
+        let n = NonceGenerator::default().advance().unwrap();
 
         assert_ne!(*n.as_ref(), [0u8; 12])
     }
 
     #[test]
     fn test_not_nonce_unqiue() {
-        let mut n = NonceGenerator {};
+        let mut n = NonceGenerator::default();
         let a = n.advance().unwrap();
         let b = n.advance().unwrap();
 
@@ -290,6 +307,8 @@ mod tests {
         let (u1, _) = PrivateUser::new("test1").unwrap();
         let (u2, _) = PrivateUser::new("test2").unwrap();
 
+        const MSG: &str = "asd";
+
         tokio::spawn(async move {
             info!("Start listening");
 
@@ -298,7 +317,14 @@ mod tests {
 
             info!("Got connection");
 
-            let er = EncryptedStream::receiver(stream, u2).await.unwrap();
+            let mut er = EncryptedStream::receiver(stream, u2).await.unwrap();
+
+            let rmsg = er.recv_message(0).await.unwrap();
+
+            match rmsg {
+                Message::String(s) => assert_eq!(s, MSG),
+                _ => assert!(false),
+            }
 
             // dbg!(er);
         });
@@ -308,9 +334,12 @@ mod tests {
         info!("Sending");
 
         let sock = TcpStream::connect("localhost:8984").await.unwrap();
-        let es = EncryptedStream::initiator(sock,u1).await.unwrap();
+        let mut es = EncryptedStream::initiator(sock, u1).await.unwrap();
+
+        es.send_message(Message::String(MSG.into())).await.unwrap();
+
+        delay_for(Duration::from_secs_f64(0.5)).await;
 
         // dbg!(es);
-
     }
 }

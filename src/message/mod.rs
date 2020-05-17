@@ -1,12 +1,15 @@
 use crate::error::DspfsError;
 use crate::user::PublicUser;
 use ring::signature::Ed25519KeyPair;
-use x25519_dalek::PublicKey;
+use std::fmt::Debug;
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Message {
-    Init { user: PublicUser, pubkey: PublicKey },
-    Yeet,
+    Init {
+        user: PublicUser,
+        pubkey: x25519_dalek::PublicKey,
+    },
+    String(String),
 }
 
 impl Message {
