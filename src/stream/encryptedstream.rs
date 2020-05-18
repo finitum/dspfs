@@ -85,7 +85,6 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> Debug for EncryptedS
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
     pub async fn initiator(mut stream: T, user: &PrivateUser) -> Result<Self, DspfsError> {
-        // TODO: Refactor to extract common methods, there are some duplicates between initiator and receiver right now
         let rng = ring::rand::SystemRandom::new();
 
         // Generate our ephemeral keypair
