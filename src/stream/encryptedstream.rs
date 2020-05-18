@@ -7,7 +7,7 @@ use ring::aead::{
     NONCE_LEN,
 };
 use ring::agreement;
-use ring::agreement::EphemeralPrivateKey;
+use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey};
 use ring::error::Unspecified;
 use ring::pbkdf2::*;
 use serde::export::Formatter;
@@ -103,28 +103,9 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         // Send a message to the user we want to connect to to initiate the Diffie Helmann exchange
         stream.write_with_length(&signedmsg).await?;
 
-        // Deserialize the message we get back
+        // Deserialize and verify the message we get back
         let other_init_message = Self::read_signed_message(&mut stream).await?;
-        let other_user_signed_message: Message = bincode::deserialize(&other_init_message.message)?;
-
-        // Extract message
-        let (peer_public_key, other_user) = match other_user_signed_message {
-            Message::Init {
-                user,
-                pubkey: other_pubkey,
-            } => (
-                agreement::UnparsedPublicKey::new(&agreement::X25519, other_pubkey),
-                user,
-            ),
-            _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
-        };
-
-        // Check signature when we know their public key
-        other_user
-            .get_public_key()
-            .ring()
-            .verify(&other_init_message.message, &other_init_message.signature)
-            .map_err(|_| DspfsError::BadSignature)?;
+        let (other_user, peer_public_key) = Self::extract_verify(&other_init_message)?;
 
         // PBKDF
         let shared_key = ring::agreement::agree_ephemeral(
@@ -133,7 +114,6 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             ring::error::Unspecified,
             |key_material| {
                 // Derive our actual symmetric keys so we can have encrypted communication
-                // WATCH OUT: REVERSE USERNAMES ON RECEIVING SIDE TO MAKE EQUAL SALTS
                 let mut salt = user.get_username().clone();
                 salt.push_str(other_user.get_username());
 
@@ -169,50 +149,25 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         })
     }
 
-    /// Reads one signed message and decodes it. Just to make other functions in this struct a little smaller and more readable.
-    async fn read_signed_message(stream: &mut T) -> Result<SignedMessage, DspfsError> {
-        let message = stream.read_with_length_limited(1024).await?;
-        Ok(bincode::deserialize(&message)?)
-    }
-
     pub async fn receiver(mut stream: T, user: PrivateUser) -> Result<Self, DspfsError> {
         let rng = ring::rand::SystemRandom::new();
-
-        let signed_init_message = Self::read_signed_message(&mut stream).await?;
-
-        // With the message from the other user, we can start the diffie hellman procedure and
-        // create our own shared secret. However, we have to send something back to them so they
-        // can get this secret as well
-        let init_message: Message = bincode::deserialize(&signed_init_message.message)?;
-
+        // Generate our ephemeral keypair
         let my_private_key = EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
         let my_public_key = my_private_key.compute_public_key()?;
 
         // Extract message parts and apply diffie hellman to create a shared secret
-        let (peer_public_key, other_user) = match init_message {
-            Message::Init {
-                user,
-                pubkey: other_pubkey,
-            } => (
-                agreement::UnparsedPublicKey::new(&agreement::X25519, other_pubkey),
-                user,
-            ),
-            _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
-        };
-
+        // let (other_user, peer_public_key) = Self::extract_message(init_message)?;
         // Check signature when we know their public key
         // TODO: Don't get this public key from the message but instead from the store.
-        other_user
-            .get_public_key()
-            .ring()
-            .verify(&signed_init_message.message, &signed_init_message.signature)
-            .map_err(|_| DspfsError::BadSignature)?;
+        let signed_init_message = Self::read_signed_message(&mut stream).await?;
+        let (other_user, peer_public_key) = Self::extract_verify(&signed_init_message)?;
 
         // Now we know the identity of the other user, send something back
         let our_init_msg = Message::Init {
             user: user.public_user().to_owned(),
             pubkey: my_public_key.as_ref().to_vec(),
         };
+
         // Sign + Send
         let signedmsg = our_init_msg.sign(user.get_keypair())?.serialize()?;
         stream.write_with_length(&signedmsg).await?;
@@ -226,12 +181,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             ring::error::Unspecified,
             |key_material| {
                 // Derive our actual symmetric keys so we can have encrypted communication
-                // WATCH OUT: REVERSE USERNAMES ON RECEIVING SIDE TO MAKE EQUAL SALTS
                 let mut salt = other_user.get_username().to_owned();
                 salt.push_str(user.get_username());
 
                 let mut shared_key = [0; 32];
-                // TODO: Derive may panic, maybe check for this?
                 derive(
                     PBKDF2_HMAC_SHA256,
                     // DO NOT MAKE 0
@@ -244,6 +197,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
                 Ok(shared_key)
             },
         )?;
+
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
         //       the other user's name as opener?
@@ -261,6 +215,35 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         })
     }
 
+    fn extract_verify(
+        signed_message: &SignedMessage,
+    ) -> Result<(PublicUser, UnparsedPublicKey<Vec<u8>>), DspfsError> {
+        let message: Message = bincode::deserialize(&signed_message.message)?;
+
+        // Extract message
+        let (user, key) = match message {
+            Message::Init { user, pubkey } => (
+                user,
+                agreement::UnparsedPublicKey::new(&agreement::X25519, pubkey),
+            ),
+            _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
+        };
+
+        // Check signature when we know their public key
+        user.get_public_key()
+            .ring()
+            .verify(&signed_message.message, &signed_message.signature)
+            .map_err(|_| DspfsError::BadSignature)?;
+        Ok((user, key))
+    }
+
+    /// Reads one signed message and decodes it. Just to make other functions in this struct a little smaller and more readable.
+    async fn read_signed_message(stream: &mut T) -> Result<SignedMessage, DspfsError> {
+        let message = stream.read_with_length_limited(1024).await?;
+        Ok(bincode::deserialize(&message)?)
+    }
+
+    /// Encrypts + Sends a [Message]
     pub async fn send_message(&mut self, message: Message) -> Result<(), DspfsError> {
         let mut serialized_message = bincode::serialize(&message)?;
         self.sealing_key
@@ -271,6 +254,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         Ok(())
     }
 
+    /// Decrypts + Receives a [Message]
     pub async fn recv_message(&mut self, limit: usize) -> Result<Message, DspfsError> {
         let mut msg = self.stream.read_with_length_limited(limit).await?;
 
