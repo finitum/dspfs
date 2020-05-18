@@ -6,6 +6,8 @@ use ring::aead::{
     Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, CHACHA20_POLY1305,
     NONCE_LEN,
 };
+use ring::agreement;
+use ring::agreement::EphemeralPrivateKey;
 use ring::error::Unspecified;
 use ring::pbkdf2::*;
 use serde::export::Formatter;
@@ -14,8 +16,6 @@ use std::fmt::Debug;
 use std::num::NonZeroU32;
 use tokio::io;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use x25519_dalek::EphemeralSecret;
-use x25519_dalek::PublicKey;
 
 #[async_trait]
 trait WriteWithLength {
@@ -85,18 +85,20 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> Debug for EncryptedS
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
     pub async fn initiator(mut stream: T, user: &PrivateUser) -> Result<Self, DspfsError> {
-        // TODO: Maybe switch to ring for DH
-        // TODO: Refactor to be independent from TcpStream
+        // TODO: Refactor to extract common methods, there are some duplicates between initiator and receiver right now
+        let rng = ring::rand::SystemRandom::new();
 
-        let our_partial_secret = EphemeralSecret::new(&mut rand_core::OsRng);
-        let our_pubkey = PublicKey::from(&our_partial_secret);
+        // Generate our ephemeral keypair
+        let my_private_key = EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
+        let my_public_key = my_private_key.compute_public_key()?;
 
-        let our_init_msg = Message::Init {
+        let my_init_msg = Message::Init {
             user: user.public_user().to_owned(),
-            pubkey: our_pubkey,
+            pubkey: my_public_key.as_ref().to_vec(),
         };
 
-        let signedmsg = our_init_msg.sign(user.get_keypair())?.serialize()?;
+        // Sign the init message
+        let signedmsg = my_init_msg.sign(user.get_keypair())?.serialize()?;
 
         // Send a message to the user we want to connect to to initiate the Diffie Helmann exchange
         stream.write_with_length(&signedmsg).await?;
@@ -105,12 +107,15 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         let other_init_message = Self::read_signed_message(&mut stream).await?;
         let other_user_signed_message: Message = bincode::deserialize(&other_init_message.message)?;
 
-        // Extract message parts and apply diffie hellman to create a shared secret
-        let (shared_secret, other_user) = match other_user_signed_message {
+        // Extract message
+        let (peer_public_key, other_user) = match other_user_signed_message {
             Message::Init {
                 user,
                 pubkey: other_pubkey,
-            } => (our_partial_secret.diffie_hellman(&other_pubkey), user),
+            } => (
+                agreement::UnparsedPublicKey::new(&agreement::X25519, other_pubkey),
+                user,
+            ),
             _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
         };
 
@@ -121,22 +126,31 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             .verify(&other_init_message.message, &other_init_message.signature)
             .map_err(|_| DspfsError::BadSignature)?;
 
-        // TODO: Less hardcoding of thingies
+        // PBKDF
+        let shared_key = ring::agreement::agree_ephemeral(
+            my_private_key,
+            &peer_public_key,
+            ring::error::Unspecified,
+            |key_material| {
+                // Derive our actual symmetric keys so we can have encrypted communication
+                // WATCH OUT: REVERSE USERNAMES ON RECEIVING SIDE TO MAKE EQUAL SALTS
+                let mut salt = user.get_username().clone();
+                salt.push_str(other_user.get_username());
 
-        // Derive our actual symmetric keys so we can have encrypted communication
-        // WATCH OUT: REVERSE USERNAMES ON RECEIVING SIDE TO MAKE EQUAL SALTS
-        let mut salt = user.get_username().clone();
-        salt.push_str(other_user.get_username());
-        let mut shared_key = [0; 32];
-        // TODO: Derive may panic, maybe check for this?
-        derive(
-            PBKDF2_HMAC_SHA256,
-            // DO NOT MAKE 0
-            NonZeroU32::new(42u32).unwrap(),
-            salt.as_bytes(),
-            shared_secret.as_bytes(),
-            &mut shared_key,
-        );
+                let mut shared_key = [0; 32];
+                // TODO: Derive may panic, maybe check for this?
+                derive(
+                    PBKDF2_HMAC_SHA256,
+                    // DO NOT MAKE 0
+                    NonZeroU32::new(42u32).unwrap(),
+                    salt.as_bytes(),
+                    key_material,
+                    &mut shared_key,
+                );
+
+                Ok(shared_key)
+            },
+        )?;
 
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
@@ -162,6 +176,8 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
     }
 
     pub async fn receiver(mut stream: T, user: PrivateUser) -> Result<Self, DspfsError> {
+        let rng = ring::rand::SystemRandom::new();
+
         let signed_init_message = Self::read_signed_message(&mut stream).await?;
 
         // With the message from the other user, we can start the diffie hellman procedure and
@@ -169,15 +185,18 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         // can get this secret as well
         let init_message: Message = bincode::deserialize(&signed_init_message.message)?;
 
-        let our_partial_secret = EphemeralSecret::new(&mut rand_core::OsRng);
-        let our_pubkey = PublicKey::from(&our_partial_secret);
+        let my_private_key = EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
+        let my_public_key = my_private_key.compute_public_key()?;
 
         // Extract message parts and apply diffie hellman to create a shared secret
-        let (shared_secret, other_user) = match init_message {
+        let (peer_public_key, other_user) = match init_message {
             Message::Init {
                 user,
                 pubkey: other_pubkey,
-            } => (our_partial_secret.diffie_hellman(&other_pubkey), user),
+            } => (
+                agreement::UnparsedPublicKey::new(&agreement::X25519, other_pubkey),
+                user,
+            ),
             _ => return Err(DspfsError::InvalidEncryptedConnectionInitialization),
         };
 
@@ -192,27 +211,39 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         // Now we know the identity of the other user, send something back
         let our_init_msg = Message::Init {
             user: user.public_user().to_owned(),
-            pubkey: our_pubkey,
+            pubkey: my_public_key.as_ref().to_vec(),
         };
+        // Sign + Send
         let signedmsg = our_init_msg.sign(user.get_keypair())?.serialize()?;
         stream.write_with_length(&signedmsg).await?;
 
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
         //       the other user's name as opener?
-        let mut salt = other_user.get_username().clone();
-        salt.push_str(user.get_username());
-        let mut shared_key = [0; 32];
-        // TODO: Derive may panic, maybe check for this?
-        derive(
-            PBKDF2_HMAC_SHA256,
-            // DO NOT MAKE 0
-            NonZeroU32::new(42u32).unwrap(),
-            salt.as_bytes(),
-            shared_secret.as_bytes(),
-            &mut shared_key,
-        );
+        let shared_key = ring::agreement::agree_ephemeral(
+            my_private_key,
+            &peer_public_key,
+            ring::error::Unspecified,
+            |key_material| {
+                // Derive our actual symmetric keys so we can have encrypted communication
+                // WATCH OUT: REVERSE USERNAMES ON RECEIVING SIDE TO MAKE EQUAL SALTS
+                let mut salt = other_user.get_username().to_owned();
+                salt.push_str(user.get_username());
 
+                let mut shared_key = [0; 32];
+                // TODO: Derive may panic, maybe check for this?
+                derive(
+                    PBKDF2_HMAC_SHA256,
+                    // DO NOT MAKE 0
+                    NonZeroU32::new(42u32).unwrap(),
+                    salt.as_bytes(),
+                    key_material,
+                    &mut shared_key,
+                );
+
+                Ok(shared_key)
+            },
+        )?;
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
         //       the other user's name as opener?
