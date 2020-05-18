@@ -2,14 +2,11 @@ use crate::error::DspfsError;
 use crate::message::{Message, SignedMessage};
 use crate::user::{PrivateUser, PublicUser};
 use async_trait::async_trait;
-use ring::aead::{
-    Aad, BoundKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey, CHACHA20_POLY1305,
-    NONCE_LEN,
-};
+use ring::aead::*;
 use ring::agreement;
-use ring::agreement::{EphemeralPrivateKey, UnparsedPublicKey};
+use ring::agreement::{EphemeralPrivateKey, PublicKey, UnparsedPublicKey};
 use ring::error::Unspecified;
-use ring::pbkdf2::*;
+use ring::pbkdf2::{derive, PBKDF2_HMAC_SHA256};
 use serde::export::Formatter;
 use std::fmt;
 use std::fmt::Debug;
@@ -69,12 +66,18 @@ impl<T: AsyncReadExt + Unpin + Send + Sync> ReadWithLength for T {
     }
 }
 
+/// EncryptedStream is a wrapper around any stream-like object to setup an
+/// end to end crypted tunnel.
+/// It first uses ECDH to make a shared secret and to verify identity
+/// then it uses said shared secret to derive a CHACHA20_POLY1305 keypair
+/// for use for further communication.
 pub struct EncryptedStream<T: AsyncReadExt + AsyncWriteExt + Unpin> {
     stream: T,
     other_user: PublicUser,
 
-    pub(self) opening_key: OpeningKey<NonceGenerator>,
-    pub(self) sealing_key: SealingKey<NonceGenerator>,
+    // symmetric key pair
+    opening_key: OpeningKey<NonceGenerator>,
+    sealing_key: SealingKey<NonceGenerator>,
 }
 
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> Debug for EncryptedStream<T> {
@@ -83,13 +86,43 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> Debug for EncryptedS
     }
 }
 
+type KDF = dyn FnOnce(&[u8]) -> Result<[u8; 32], ring::error::Unspecified>;
+
+// TODO: Verify PublicKey
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
-    pub async fn initiator(mut stream: T, user: &PrivateUser) -> Result<Self, DspfsError> {
+    /// Generates a ephemeral keypair for use with ECDH using Ring
+    fn generate_ephemeral_keypair() -> Result<(PublicKey, EphemeralPrivateKey), DspfsError> {
+        // FIXME: should be passed down
         let rng = ring::rand::SystemRandom::new();
 
         // Generate our ephemeral keypair
         let my_private_key = EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
         let my_public_key = my_private_key.compute_public_key()?;
+
+        Ok((my_public_key, my_private_key))
+    }
+
+    /// Creates a symmetric CHACHA20_POLY1305 keypair to encrypt and decrypt all communiction
+    /// the shared_key should have been obtained using ECDH
+    fn create_symmetric_keypair(
+        shared_key: &[u8],
+    ) -> Result<(OpeningKey<NonceGenerator>, SealingKey<NonceGenerator>), DspfsError> {
+        // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
+        //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
+        //       the other user's name as opener?
+        let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
+        let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
+
+        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator::default());
+        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator::default());
+
+        Ok((opening_key, sealing_key))
+    }
+
+    /// initiator is used to initiate an EncryptedStream
+    /// this will use ECDH for key exchange and CHACHA20_POLY1305 as symmetric encryption
+    pub async fn initiator(mut stream: T, user: &PrivateUser) -> Result<Self, DspfsError> {
+        let (my_public_key, my_private_key) = Self::generate_ephemeral_keypair()?;
 
         let my_init_msg = Message::Init {
             user: user.public_user().to_owned(),
@@ -111,34 +144,10 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             my_private_key,
             &peer_public_key,
             ring::error::Unspecified,
-            |key_material| {
-                // Derive our actual symmetric keys so we can have encrypted communication
-                let mut salt = user.get_username().clone();
-                salt.push_str(other_user.get_username());
-
-                let mut shared_key = [0; 32];
-                // TODO: Derive may panic, maybe check for this?
-                derive(
-                    PBKDF2_HMAC_SHA256,
-                    // DO NOT MAKE 0
-                    NonZeroU32::new(42u32).unwrap(),
-                    salt.as_bytes(),
-                    key_material,
-                    &mut shared_key,
-                );
-
-                Ok(shared_key)
-            },
+            Self::kdff(user.public_user().to_owned(), other_user.clone()),
         )?;
 
-        // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
-        //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
-        //       the other user's name as opener?
-        let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
-        let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
-
-        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator::default());
-        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator::default());
+        let (opening_key, sealing_key) = Self::create_symmetric_keypair(&shared_key)?;
 
         Ok(Self {
             stream,
@@ -148,17 +157,15 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         })
     }
 
+    /// receiver is used to receive an EncryptedStream
+    /// this will use ECDH for key exchange and CHACHA20_POLY1305 as symmetric encryption
     pub async fn receiver(mut stream: T, user: PrivateUser) -> Result<Self, DspfsError> {
-        let rng = ring::rand::SystemRandom::new();
         // Generate our ephemeral keypair
-        let my_private_key = EphemeralPrivateKey::generate(&agreement::X25519, &rng)?;
-        let my_public_key = my_private_key.compute_public_key()?;
+        let (my_public_key, my_private_key) = Self::generate_ephemeral_keypair()?;
+
+        let signed_init_message = Self::read_signed_message(&mut stream).await?;
 
         // Extract message parts and apply diffie hellman to create a shared secret
-        // let (other_user, peer_public_key) = Self::extract_message(init_message)?;
-        // Check signature when we know their public key
-        // TODO: Don't get this public key from the message but instead from the store.
-        let signed_init_message = Self::read_signed_message(&mut stream).await?;
         let (other_user, peer_public_key) = Self::extract_verify(&signed_init_message)?;
 
         // Now we know the identity of the other user, send something back
@@ -167,7 +174,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             pubkey: my_public_key.as_ref().to_vec(),
         };
 
-        // Sign + Send
+        // Sign, Seal, Deliver
         let signedmsg = our_init_msg.sign(user.get_keypair())?.serialize()?;
         stream.write_with_length(&signedmsg).await?;
 
@@ -178,33 +185,11 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
             my_private_key,
             &peer_public_key,
             ring::error::Unspecified,
-            |key_material| {
-                // Derive our actual symmetric keys so we can have encrypted communication
-                let mut salt = other_user.get_username().to_owned();
-                salt.push_str(user.get_username());
-
-                let mut shared_key = [0; 32];
-                derive(
-                    PBKDF2_HMAC_SHA256,
-                    // DO NOT MAKE 0
-                    NonZeroU32::new(42u32).unwrap(),
-                    salt.as_bytes(),
-                    key_material,
-                    &mut shared_key,
-                );
-
-                Ok(shared_key)
-            },
+            Self::kdff(other_user.clone(), user.public_user().to_owned()),
         )?;
 
-        // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
-        //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
-        //       the other user's name as opener?
-        let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
-        let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)?;
-
-        let opening_key = OpeningKey::new(unbound_key1, NonceGenerator::default());
-        let sealing_key = SealingKey::new(unbound_key2, NonceGenerator::default());
+        // Generate the CHACHA20_POLY1305 keypair
+        let (opening_key, sealing_key) = Self::create_symmetric_keypair(&shared_key)?;
 
         Ok(Self {
             stream,
@@ -214,6 +199,30 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         })
     }
 
+    /// kdff returns a key derivation function to be used with ring's derive.
+    /// it uses PBKDF2_HMAC_SHA256 as the algorithm for this
+    /// and (for now) concats the intitiator's username and receiver's username as salt.
+    fn kdff(initiator: PublicUser, receiver: PublicUser) -> Box<KDF> {
+        Box::new(move |key_material| {
+            let mut salt = initiator.get_username().to_owned();
+            salt.push_str(receiver.get_username());
+
+            let mut shared_key = [0; 32];
+            derive(
+                PBKDF2_HMAC_SHA256,
+                // DO NOT MAKE 0
+                NonZeroU32::new(42u32).unwrap(),
+                salt.as_bytes(),
+                key_material,
+                &mut shared_key,
+            );
+
+            Ok(shared_key)
+        })
+    }
+
+    /// extract_verify extracts and verifies theessage using the embedded key
+    /// you should verify that the PublicUser matches thene you expect.
     fn extract_verify(
         signed_message: &SignedMessage,
     ) -> Result<(PublicUser, UnparsedPublicKey<Vec<u8>>), DspfsError> {
@@ -229,6 +238,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         };
 
         // Check signature when we know their public key
+        // TODO: Maybe take another user as argso we can verify identity early
         user.get_public_key()
             .ring()
             .verify(&signed_message.message, &signed_message.signature)
