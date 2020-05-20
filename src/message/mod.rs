@@ -5,10 +5,7 @@ use std::fmt::Debug;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Message {
-    Init {
-        user: PublicUser,
-        pubkey: x25519_dalek::PublicKey,
-    },
+    Init { user: PublicUser, pubkey: Vec<u8> },
     String(String),
 }
 
