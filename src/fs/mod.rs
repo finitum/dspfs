@@ -1,3 +1,3 @@
 mod hash;
-mod local;
-mod shared;
+pub mod local;
+pub mod shared;

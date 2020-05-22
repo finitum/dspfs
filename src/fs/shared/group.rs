@@ -1,8 +1,10 @@
-use crate::error::DspfsError;
 use crate::fs::shared;
-use crate::store::SharedStore;
+use crate::store::{SharedStore, Store};
 use crate::user::PublicUser;
+use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
+use std::iter;
+use std::iter::FromIterator;
 use std::path::PathBuf;
 
 pub struct Group {
@@ -12,24 +14,37 @@ pub struct Group {
 }
 
 impl Group {
+    pub fn new(me: PublicUser) -> Self {
+        Self {
+            files: HashMap::new(),
+            users: HashSet::from_iter(iter::once(me)),
+        }
+    }
+
     /// Adds a file to the hashmap of a user. This can be `me`.
     /// TODO: when a file is added, we should probably broadcast that this new file
     ///       exists so others can download it (That's why this fn is async)
-    pub async fn add_file(&self, _from: &PublicUser, _file: shared::File) {}
+    pub fn add_file(&mut self, from: &PublicUser, file: shared::File) {
+        self.files
+            .entry(from.to_owned())
+            .or_insert_with(HashMap::new)
+            .insert(file.path.clone(), file);
+    }
 
-    pub async fn get_my_files(
+    pub async fn get_my_files<S: Store>(
         &self,
-        store: SharedStore,
-    ) -> Result<impl Iterator<Item = &shared::File>, DspfsError> {
+        store: SharedStore<S>,
+    ) -> Result<impl Iterator<Item = &shared::File>> {
         let guard = store.read().await;
-        let me = guard.get_self_user().as_ref().ok_or_else(|| {
-            DspfsError::NotFoundInStore("Group::add_file(): Could not find user in store".into())
-        })?;
+        let me = guard
+            .get_me()
+            .context("couldn't access the store")?
+            .context("couldn't find  user in store")?;
 
         Ok(self
             .files
             .get(&me)
-            .ok_or_else(|| DspfsError::from("User not found"))?
+            .context("couldn't get my files from files")?
             .values())
     }
 
@@ -67,6 +82,7 @@ mod tests {
     use crate::user::PublicUser;
     use ring::digest::{digest, SHA512};
     use std::collections::HashMap;
+    use std::convert::TryInto;
     use std::path::PathBuf;
 
     #[test]
@@ -98,8 +114,8 @@ mod tests {
             users: Default::default(),
         };
 
-        let user_a = PublicUser::new(vec![0].into(), "user_a");
-        let user_b = PublicUser::new(vec![1].into(), "user_b");
+        let user_a = PublicUser::new(vec![0u8; 32].try_into().unwrap(), "user_a");
+        let user_b = PublicUser::new(vec![1u8; 32].try_into().unwrap(), "user_b");
 
         g.files.insert(user_a, paths_a);
         g.files.insert(user_b, paths_b);
