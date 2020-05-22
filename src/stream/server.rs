@@ -1,7 +1,7 @@
-use crate::error::DspfsError;
-use crate::store::SharedStore;
+use crate::store::{SharedStore, Store};
 use crate::stream::encryptedstream::EncryptedStream;
 use crate::user::PrivateUser;
+use anyhow::{Context, Result};
 use log::error;
 use log::*;
 use std::net::SocketAddr;
@@ -10,26 +10,37 @@ use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-pub struct Server {
+pub struct Server<S: Store + 'static> {
     listener: TcpListener,
-    store: SharedStore,
+    store: SharedStore<S>,
+    pub addr: SocketAddr,
 }
 
 pub struct ServerHandle {
     pub(self) stop_channel: Sender<()>,
+
+    pub addr: SocketAddr,
 }
 
 impl ServerHandle {
-    pub async fn stop(mut self) -> Result<(), DspfsError> {
-        self.stop_channel.send(()).await?;
+    pub async fn stop(mut self) -> Result<()> {
+        self.stop_channel
+            .send(())
+            .await
+            .context("failed to stop server")?;
         Ok(())
     }
 }
 
-impl Server {
+impl<S: Store + 'static> Server<S> {
     // Creates a server struct with the tcplistener
-    pub async fn new(addr: impl ToSocketAddrs, store: SharedStore) -> Result<Self, DspfsError> {
+    pub async fn new(addr: impl ToSocketAddrs, store: SharedStore<S>) -> Result<Self> {
         Ok(Server {
+            addr: addr
+                .to_socket_addrs()
+                .await?
+                .next()
+                .context("couldn't get socket address")?,
             listener: TcpListener::bind(&addr).await?,
             store: store.clone(),
         })
@@ -40,6 +51,8 @@ impl Server {
     pub async fn start(mut self) -> ServerHandle {
         let (tx, mut rx) = channel(2);
 
+        let addr = self.addr;
+
         info!("Starting server");
         // Outer loop for catching errors
         tokio::spawn(async move {
@@ -48,11 +61,14 @@ impl Server {
             }
         });
 
-        ServerHandle { stop_channel: tx }
+        ServerHandle {
+            stop_channel: tx,
+            addr,
+        }
     }
 
     // Inner loop for receiving messages and calling on [process]
-    async fn internal_start(&mut self, stopper: &mut Receiver<()>) -> Result<(), DspfsError> {
+    async fn internal_start(&mut self, stopper: &mut Receiver<()>) -> Result<()> {
         info!("Now accepting requests");
 
         loop {
@@ -63,7 +79,7 @@ impl Server {
                 }
                 accepted = self.listener.accept() => {
                     // Normal message
-                    let (stream, addr) = accepted?;
+                    let (stream, addr) = accepted.context("failed to accept connection")?;
                     let local_store = self.store.clone();
 
                     // process the message
@@ -79,18 +95,18 @@ impl Server {
 }
 
 // Actually process the incoming requests
-async fn receive(
-    store: SharedStore,
+async fn receive<S: Store>(
+    store: SharedStore<S>,
     stream: TcpStream,
     _addr: SocketAddr,
-) -> Result<(), DspfsError> {
-    let user = {
-        let guard = store.read().await;
-
-        // FIXME
-        PrivateUser::load_from_store(guard.deref().deref())?
-    };
-    let mut es = EncryptedStream::receiver(stream, user).await?;
+) -> Result<()> {
+    let guard = store.read().await;
+    // FIXME
+    let user = PrivateUser::load_from_store(guard.deref().deref())
+        .context("Couldn't load user from store")?;
+    let mut es = EncryptedStream::receiver(stream, user)
+        .await
+        .context("Couldn't establish secure connection")?;
 
     while let Ok(message) = es.recv_message(4096).await {
         info!("{:?}", message);
@@ -105,7 +121,7 @@ async fn receive(
 pub mod tests {
     use crate::init;
     use crate::message::Message;
-    use crate::store::inmemory::InMemory;
+    use crate::store::inmemory::InMemoryStore;
     use crate::store::Store;
     use crate::stream::{Client, Server};
     use crate::user::PrivateUser;
@@ -118,10 +134,10 @@ pub mod tests {
         let (u1, doc1) = PrivateUser::new("Test1").unwrap();
         let (u2, _) = PrivateUser::new("Test2").unwrap();
 
-        let store1 = InMemory::default().shared();
+        let store1 = InMemoryStore::default().shared();
 
-        store1.write().await.set_signing_key(doc1);
-        store1.write().await.set_self_user(u1.to_owned());
+        store1.write().await.set_signing_key(doc1).unwrap();
+        store1.write().await.set_me(u1.to_owned()).unwrap();
 
         let server = Server::new("0.0.0.0:8123", store1)
             .await

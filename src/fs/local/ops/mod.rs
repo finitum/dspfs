@@ -1,23 +1,27 @@
-use crate::error::DspfsError;
 use crate::fs::hash::FileHash;
+use anyhow::Result;
 use async_trait::async_trait;
 use std::path::PathBuf;
 
-mod nop;
+pub mod nop;
+pub mod real;
 
 #[async_trait]
 pub trait FileOps: Send + Sync {
-    async fn read(path: &PathBuf, offset: usize, length: usize) -> Result<Vec<u8>, DspfsError>;
+    async fn read(path: &PathBuf, offset: u64, length: u64) -> Result<Vec<u8>>;
 
-    async fn size(path: &PathBuf) -> Result<u64, DspfsError>;
+    async fn size(path: &PathBuf) -> Result<u64>;
 
-    async fn write(path: &PathBuf, offset: usize, data: Vec<u8>) -> Result<(), DspfsError>;
+    async fn write(path: &PathBuf, offset: u64, data: Vec<u8>) -> Result<()>;
 
-    async fn delete(path: &PathBuf) -> Result<(), DspfsError>;
+    async fn delete(path: &PathBuf) -> Result<()>;
 
-    async fn hash(path: &PathBuf) -> Result<FileHash, DspfsError> {
-        let file = Self::read(&path, 0, Self::size(&path).await? as usize).await?;
+    async fn hash(path: &PathBuf) -> Result<FileHash> {
+        let file = Self::read(&path, 0, Self::size(&path).await?).await?;
 
         Ok(FileHash::from(file))
     }
+
+    /// Returns an iterator over all files in a directory, recursively
+    async fn recursive_files(path: &PathBuf) -> Result<Box<dyn Iterator<Item = PathBuf>>>;
 }
