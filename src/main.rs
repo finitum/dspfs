@@ -6,7 +6,7 @@ use std::error::Error;
 mod dspfs;
 mod fs;
 mod message;
-mod store;
+mod global_store;
 mod stream;
 mod user;
 
@@ -22,7 +22,7 @@ fn init() {
 async fn main() -> Result<(), Box<dyn Error>> {
     init();
 
-    let _store = store::inmemory::InMemoryStore::default();
+    let _store = global_store::inmemory::InMemoryStore::default();
 
     // Run program
     info!("Hello world!");

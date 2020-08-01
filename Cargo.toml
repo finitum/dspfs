@@ -19,7 +19,10 @@ walkdir = "2.3"
 notify = "5.0.0-pre.2"
 heed = "0.7"
 anyhow = "1.0"
-zerocopy = "0.3.0"
+zerocopy = "0.3"
+uuid = {version = "0.8.1", features = ["serde", "v4"]}
+blake3 = "0.3"
 
 [dev-dependencies]
 mockall = "0.7.1"
+tempfile = "3.1.0"

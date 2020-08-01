@@ -1,31 +1,41 @@
-use ring::digest::{Digest, SHA512};
-use std::hash::{Hash, Hasher};
+use serde::{Serialize, Deserialize};
 
-#[derive(Copy, Clone, Debug)]
-pub struct FileHash(Digest);
+pub const BLOCK_HASHING_ALGORITHM: HashingAlgorithm = HashingAlgorithm::BLAKE3;
 
-impl<T: AsRef<[u8]>> From<T> for FileHash {
-    fn from(file: T) -> Self {
-        Self(ring::digest::digest(&SHA512, &file.as_ref()))
-    }
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
+pub enum HashingAlgorithm {
+    BLAKE3
 }
 
-impl FileHash {
-    pub fn as_bytes(&self) -> &[u8] {
-        self.0.as_ref()
-    }
+#[derive(Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Debug)]
+pub struct Hash {
+    hash: Vec<u8>,
 }
 
-impl Hash for FileHash {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.as_ref().hash(state)
+impl Hash {
+    pub fn new(hash: Vec<u8>) -> Self {
+        Self { hash }
+    }
+
+    pub fn hash_block(algorithm: HashingAlgorithm, block: &[u8]) -> Self {
+        match algorithm{
+            HashingAlgorithm::BLAKE3 => Self::new(blake3::hash(block).as_bytes().to_vec())
+        }
+    }
+
+    pub fn hash_block_hashes(algorithm: HashingAlgorithm, block_hashes: &[Hash]) -> Self {
+        match algorithm {
+            HashingAlgorithm::BLAKE3 => {
+                let mut hasher = blake3::Hasher::new();
+                for hash in block_hashes {
+                    hasher.update(hash.bytes());
+                }
+                Self::new(hasher.finalize().as_bytes().to_vec())
+            }
+        }
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        self.hash.as_slice()
     }
 }
-
-impl PartialEq for FileHash {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_ref() == other.0.as_ref()
-    }
-}
-
-impl Eq for FileHash {}

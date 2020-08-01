@@ -1,12 +1,12 @@
 use crate::dspfs::Dspfs;
-use crate::store::inmemory::InMemoryStore;
-use crate::store::{SharedStore, Store};
-use crate::stream::Server;
+use crate::global_store::inmemory::InMemoryStore;
+use crate::global_store::{SharedStore, Store};
 use crate::user::PrivateUser;
 use anyhow::Result;
 use ring::pkcs8::Document;
 use std::collections::HashMap;
 use tokio::net::ToSocketAddrs;
+use crate::dspfs::server::Server;
 
 pub struct DspfsBuilder {}
 
@@ -21,7 +21,7 @@ impl DspfsBuilder {
 
     // pub fn from_disk(self, dbpath: impl AsRef<Path>) -> DspfsBuilderInMemory {
     //     DspfsBuilderWithStore {
-    //         store: Arc::new(()),
+    //         global_store: Arc::new(()),
     //         me: ()
     //     }
     // }
@@ -31,11 +31,12 @@ pub struct DspfsBuilderInMemory {}
 
 impl DspfsBuilderInMemory {
     pub fn with_user(
+        &self,
         (user, document): (PrivateUser, Document),
     ) -> DspfsBuilderWithStore<InMemoryStore> {
         let mut store = InMemoryStore::default();
         store.set_signing_key(document).unwrap();
-        store.set_me(user.public_user().to_owned()).unwrap();
+        store.set_self_user(user.public_user().to_owned()).unwrap();
 
         DspfsBuilderWithStore {
             store: store.shared(),

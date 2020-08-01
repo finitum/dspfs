@@ -1,3 +1,5 @@
-mod hash;
-pub mod local;
-pub mod shared;
+
+pub mod group;
+pub mod file;
+pub mod filetree;
+pub mod hash;

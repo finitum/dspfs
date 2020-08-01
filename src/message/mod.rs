@@ -2,11 +2,30 @@ use crate::user::PublicUser;
 use anyhow::{Context, Result};
 use ring::signature::Ed25519KeyPair;
 use std::fmt::Debug;
+use uuid::Uuid;
+use crate::fs::hash::Hash;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub enum ErrorMessage {
+    /// Someone asked for this file but we don't have it
+    FileNotFound
+}
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Message {
     Init { user: PublicUser, pubkey: Vec<u8> },
     String(String),
+    FileBlockRequest {
+        groupuuid: Uuid,
+        filehash: Hash,
+        index: u64,
+    },
+    
+    // Returns a file requested by a file request
+    FileBlock(Vec<u8>),
+
+    // Something went wrong!
+    Error(ErrorMessage)
 }
 
 impl Message {

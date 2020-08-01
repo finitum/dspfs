@@ -1,16 +1,19 @@
-use crate::dspfs::notify::Notify;
-use crate::fs::shared::File;
-use crate::store::{SharedStore, Store};
-use crate::stream::{Client, Server, ServerHandle};
+use crate::global_store::{SharedStore, Store};
 use crate::user::{PrivateUser, PublicUser};
 use anyhow::Result;
-use async_trait::async_trait;
 use log::*;
 use std::collections::HashMap;
 use std::mem;
+use std::path::Path;
+use crate::fs::group::StoredGroup;
+use std::fs;
+use crate::dspfs::server::{Server, ServerHandle};
+use crate::dspfs::client::Client;
+use crate::dspfs::builder::DspfsBuilder;
 
 pub mod builder;
-pub mod notify;
+pub mod server;
+pub mod client;
 
 pub struct Dspfs<S: Store + 'static> {
     pub(self) store: SharedStore<S>,
@@ -22,6 +25,11 @@ pub struct Dspfs<S: Store + 'static> {
 }
 
 impl<S: Store> Dspfs<S> {
+
+    pub fn builder() -> DspfsBuilder {
+        DspfsBuilder::new()
+    }
+
     pub async fn start(&mut self) {
         if self.server.is_some() {
             if let Some(server) = mem::replace(&mut self.server, None) {
@@ -35,10 +43,8 @@ impl<S: Store> Dspfs<S> {
     pub async fn stop(&mut self) -> Result<()> {
         if self.serverhandle.is_some() {
             if let Some(serverhandle) = mem::replace(&mut self.serverhandle, None) {
-                mem::replace(
-                    &mut self.server,
-                    Some(Server::new(serverhandle.addr, self.store.clone()).await?),
-                );
+                self.server.replace(Server::new(serverhandle.addr, self.store.clone()).await?);
+
                 serverhandle.stop().await?;
             }
         } else {
@@ -47,11 +53,36 @@ impl<S: Store> Dspfs<S> {
 
         Ok(())
     }
-}
+    
+    pub async fn new_group(&mut self, path: impl AsRef<Path>) -> Result<()> {
+        // 1. create or find folder (mkdir -p)
+        // a)
+        // 2. create .dspfs folder inside of that folder
+        // 2.1: build file tree
+        // 2.2: schedule index
 
-#[async_trait]
-impl<S: Store> Notify for Dspfs<S> {
-    async fn file_added(&mut self, _file: &File) -> Result<()> {
-        unimplemented!()
+        // b)
+        // 2. Import the existing .dspfs folder
+
+        let group = StoredGroup::new(&path);
+
+        if group.dspfs_folder().exists() {
+            // Existing folder
+            todo!()
+        } else {
+            // New folder
+            fs::create_dir_all(group.dspfs_folder())?;
+            self.store.write().await.add_group(group)?;
+        }
+
+        Ok(())
     }
 }
+
+//
+// #[async_trait]
+// impl<S: Store> Notify for Dspfs<S> {
+//     async fn file_added(&mut self, _file: &File) -> Result<()> {
+//         unimplemented!()
+//     }
+// }

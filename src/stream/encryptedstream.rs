@@ -79,7 +79,7 @@ impl<T: AsyncReadExt + Unpin + Send + Sync> ReadWithLength for T {
 /// for use for further communication.
 pub struct EncryptedStream<T: AsyncReadExt + AsyncWriteExt + Unpin> {
     stream: T,
-    other_user: PublicUser,
+    pub other_user: PublicUser,
 
     // symmetric key pair
     opening_key: OpeningKey<NonceGenerator>,
@@ -96,6 +96,11 @@ type KDF = dyn FnOnce(&[u8]) -> std::result::Result<[u8; 32], ring::error::Unspe
 
 // TODO: Verify PublicKey
 impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
+    /// closes this encryptedstream
+    pub fn close(self) {
+        drop(self);
+    }
+
     /// Generates a ephemeral keypair for use with ECDH using Ring
     fn generate_ephemeral_keypair() -> Result<(PublicKey, EphemeralPrivateKey)> {
         // FIXME: should be passed down
@@ -118,7 +123,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
     ) -> Result<(OpeningKey<NonceGenerator>, SealingKey<NonceGenerator>)> {
         // TODO: Is this good practice? Should you make a sealing key and opening key from one shared secret?
         //       Should we use different salts for the sealer and opener? Maybe use our username as sealer and
-        //       the other user's name as opener?
+        //       the other user's name as opener? Are the same key?
         let unbound_key1 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)
             .map_err(|_| anyhow::anyhow!("unspecified ring error"))?;
         let unbound_key2 = UnboundKey::new(&CHACHA20_POLY1305, &shared_key)
@@ -257,8 +262,8 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         })
     }
 
-    /// extract_verify extracts and verifies theessage using the embedded key
-    /// you should verify that the PublicUser matches thene you expect.
+    /// extract_verify extracts and verifies the message using the embedded key
+    /// you should verify that the PublicUser matches the key you expect.
     fn extract_verify(
         signed_message: &SignedMessage,
     ) -> Result<(PublicUser, UnparsedPublicKey<Vec<u8>>)> {
@@ -279,7 +284,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
         };
 
         // Check signature when we know their public key
-        // TODO: Maybe take another user as argso we can verify identity early
+        // TODO: Maybe take another user as an argument so that we can verify identity early
         user.get_public_key()
             .ring()
             .verify(&signed_message.message, &signed_message.signature)
@@ -330,6 +335,7 @@ impl<T: AsyncReadExt + AsyncWriteExt + Unpin + Send + Sync> EncryptedStream<T> {
     }
 }
 
+// TODO: Hash based? initial vector?
 struct NonceGenerator {
     value: u128,
 }
@@ -431,7 +437,5 @@ mod tests {
         es.send_message(Message::String(MSG.into())).await.unwrap();
 
         delay_for(Duration::from_secs_f64(0.5)).await;
-
-        // dbg!(es);
     }
 }

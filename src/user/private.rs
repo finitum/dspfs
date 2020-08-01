@@ -1,4 +1,4 @@
-use crate::store::Store;
+use crate::global_store::Store;
 use crate::user::PublicUser;
 use anyhow::{Context, Result};
 use ring::pkcs8::Document;
@@ -44,14 +44,13 @@ impl PrivateUser {
     pub fn load_from_store<S: Store>(store: &S) -> Result<Self> {
         Ok(Self {
             public_user: store
-                .get_me()
-                .context("couldn't load from store")?
-                .context("user not found in store")?
-                .clone(),
+                .get_self_user()
+                .context("couldn't load from global_store")?
+                .context("user not found in global_store")?,
             keypair: store
                 .get_signing_key()
-                .context("couldn't load key from store")?
-                .context("signing key not present int store")?,
+                .context("couldn't load key from global_store")?
+                .context("signing key not present int global_store")?,
         })
     }
 }

@@ -1,5 +1,5 @@
 use crate::message::Message;
-use crate::stream::encryptedstream::EncryptedStream;
+use crate::stream::EncryptedStream;
 use crate::user::PrivateUser;
 use anyhow::{Context, Result};
 use tokio::net::{TcpStream, ToSocketAddrs};
