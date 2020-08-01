@@ -2,7 +2,7 @@ use crate::global_store::{SharedStore, Store};
 use crate::message::{ErrorMessage, Message};
 use crate::stream::EncryptedStream;
 use crate::user::PrivateUser;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use std::net::SocketAddr;
 use std::ops::Deref;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -151,7 +151,6 @@ async fn handle_connection<S: Store>(
                     return Ok(());
                 };
 
-
                 es.send_message(Message::FileBlock(block)).await?;
             }
             message => log::error!("Received invalid message: {:?}", message),
@@ -164,19 +163,19 @@ async fn handle_connection<S: Store>(
 #[cfg(test)]
 pub mod tests {
     use crate::dspfs::client::Client;
-    use crate::dspfs::server::{Server, handle_connection};
+    use crate::dspfs::server::{handle_connection, Server};
     use crate::fs::file::File;
     use crate::fs::group::StoredGroup;
     use crate::global_store::inmemory::InMemoryStore;
     use crate::global_store::Store;
     use crate::init;
     use crate::message::Message;
-    use crate::user::PrivateUser;
-    use tokio::time::{delay_for, Duration};
     use crate::stream::EncryptedStream;
-    use std::ops::{Deref};
-    use tempfile::tempdir;
+    use crate::user::PrivateUser;
     use std::io::Write;
+    use std::ops::Deref;
+    use tempfile::tempdir;
+    use tokio::time::{delay_for, Duration};
 
     #[tokio::test]
     pub async fn test_simple_stream() {
@@ -233,18 +232,30 @@ pub mod tests {
         test_file.write_all(b"Hello World!\n").unwrap();
 
         store1.write().await.add_group(group).unwrap();
-        let mut loaded_group = store1.read().await.get_group(guuid).unwrap().unwrap().reload(store1.clone()).unwrap();
+        let mut loaded_group = store1
+            .read()
+            .await
+            .get_group(guuid)
+            .unwrap()
+            .unwrap()
+            .reload(store1.clone())
+            .unwrap();
 
         // Create file with the hash we will ask
         let file = File::new_empty("test".into());
         let fhash = file.hash.clone();
-        loaded_group.add_file(&us.public_user(), file).await.unwrap();
+        loaded_group
+            .add_file(&us.public_user(), file)
+            .await
+            .unwrap();
 
         let (tx, rx) = tokio::net::UnixStream::pair().unwrap();
         let es = EncryptedStream::initiator(tx, &us);
 
         tokio::spawn(async move {
-            handle_connection(store1.clone(), rx, "127.0.0.1:8000".parse().unwrap()).await.unwrap();
+            handle_connection(store1.clone(), rx, "127.0.0.1:8000".parse().unwrap())
+                .await
+                .unwrap();
         });
 
         let mut es = es.await.unwrap();
@@ -252,8 +263,10 @@ pub mod tests {
         es.send_message(Message::FileBlockRequest {
             groupuuid: guuid,
             filehash: fhash,
-            index: 0
-        }).await.unwrap();
+            index: 0,
+        })
+        .await
+        .unwrap();
 
         let msg = es.recv_message(1024).await.unwrap();
 

@@ -1,10 +1,10 @@
+use crate::fs::group::StoredGroup;
 use crate::user::PublicUser;
 use anyhow::Result;
 use ring::pkcs8;
 use ring::signature::Ed25519KeyPair;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::fs::group::StoredGroup;
 use uuid::Uuid;
 
 pub mod heed;
@@ -48,4 +48,3 @@ pub trait Store: Send + Sync {
     /// Removes a group from the store.
     fn delete_group(&mut self, group: &StoredGroup) -> Result<()>;
 }
-

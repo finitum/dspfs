@@ -1,3 +1,4 @@
+use crate::dspfs::server::Server;
 use crate::dspfs::Dspfs;
 use crate::global_store::inmemory::InMemoryStore;
 use crate::global_store::{SharedStore, Store};
@@ -6,7 +7,6 @@ use anyhow::Result;
 use ring::pkcs8::Document;
 use std::collections::HashMap;
 use tokio::net::ToSocketAddrs;
-use crate::dspfs::server::Server;
 
 pub struct DspfsBuilder {}
 

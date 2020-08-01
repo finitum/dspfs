@@ -1,13 +1,13 @@
+use crate::fs::group::StoredGroup;
 use crate::global_store::{SharedStore, Store};
 use crate::user::PublicUser;
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
 use ring::pkcs8::Document;
 use ring::signature::Ed25519KeyPair;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::fs::group::StoredGroup;
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 
 pub struct InMemoryStore {
     user: Option<PublicUser>,
@@ -20,7 +20,7 @@ impl Default for InMemoryStore {
         Self {
             user: None,
             signing_key: None,
-            groups: HashMap::new()
+            groups: HashMap::new(),
         }
     }
 }
@@ -56,7 +56,9 @@ impl Store for InMemoryStore {
             e.insert(group);
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Can't add a group at a location in the filesystem which already has a group."))
+            Err(anyhow::anyhow!(
+                "Can't add a group at a location in the filesystem which already has a group."
+            ))
         }
     }
 
@@ -69,12 +71,15 @@ impl Store for InMemoryStore {
             *e.get_mut() = group.clone();
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Can't update a group which doesn't exist yet"))
+            Err(anyhow::anyhow!(
+                "Can't update a group which doesn't exist yet"
+            ))
         }
     }
 
     fn delete_group(&mut self, group: &StoredGroup) -> Result<()> {
-        self.groups.remove(&group.uuid)
+        self.groups
+            .remove(&group.uuid)
             .context("Can't remove a group which is not (yet) in the store")?;
         Ok(())
     }

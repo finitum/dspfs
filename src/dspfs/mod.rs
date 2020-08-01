@@ -1,19 +1,19 @@
+use crate::dspfs::builder::DspfsBuilder;
+use crate::dspfs::client::Client;
+use crate::dspfs::server::{Server, ServerHandle};
+use crate::fs::group::StoredGroup;
 use crate::global_store::{SharedStore, Store};
 use crate::user::{PrivateUser, PublicUser};
 use anyhow::Result;
 use log::*;
 use std::collections::HashMap;
+use std::fs;
 use std::mem;
 use std::path::Path;
-use crate::fs::group::StoredGroup;
-use std::fs;
-use crate::dspfs::server::{Server, ServerHandle};
-use crate::dspfs::client::Client;
-use crate::dspfs::builder::DspfsBuilder;
 
 pub mod builder;
-pub mod server;
 pub mod client;
+pub mod server;
 
 pub struct Dspfs<S: Store + 'static> {
     pub(self) store: SharedStore<S>,
@@ -25,7 +25,6 @@ pub struct Dspfs<S: Store + 'static> {
 }
 
 impl<S: Store> Dspfs<S> {
-
     pub fn builder() -> DspfsBuilder {
         DspfsBuilder::new()
     }
@@ -43,7 +42,8 @@ impl<S: Store> Dspfs<S> {
     pub async fn stop(&mut self) -> Result<()> {
         if self.serverhandle.is_some() {
             if let Some(serverhandle) = mem::replace(&mut self.serverhandle, None) {
-                self.server.replace(Server::new(serverhandle.addr, self.store.clone()).await?);
+                self.server
+                    .replace(Server::new(serverhandle.addr, self.store.clone()).await?);
 
                 serverhandle.stop().await?;
             }
@@ -53,7 +53,7 @@ impl<S: Store> Dspfs<S> {
 
         Ok(())
     }
-    
+
     pub async fn new_group(&mut self, path: impl AsRef<Path>) -> Result<()> {
         // 1. create or find folder (mkdir -p)
         // a)

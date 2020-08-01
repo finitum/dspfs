@@ -5,8 +5,8 @@ use std::error::Error;
 
 mod dspfs;
 mod fs;
-mod message;
 mod global_store;
+mod message;
 mod stream;
 mod user;
 

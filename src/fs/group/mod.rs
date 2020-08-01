@@ -1,22 +1,22 @@
-mod store;
 mod heed;
+mod store;
 
-use std::path::{PathBuf, Path};
-use serde::{Serialize, Deserialize};
-use crate::fs::group::store::{GroupStore, SharedGroupStore};
-use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use anyhow::{Result, Context};
-use crate::fs::group::heed::HeedGroupStore;
-use uuid::Uuid;
-use crate::user::PublicUser;
 use crate::fs::file::File;
+use crate::fs::group::heed::HeedGroupStore;
+use crate::fs::group::store::{GroupStore, SharedGroupStore};
 use crate::fs::hash::Hash;
 use crate::global_store::{SharedStore, Store};
-use tokio::fs;
+use crate::user::PublicUser;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::io::SeekFrom;
+use std::ops::{Deref, DerefMut};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::fs;
 use tokio::io::AsyncReadExt;
+use tokio::sync::RwLock;
+use uuid::Uuid;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoredGroup {
@@ -26,7 +26,6 @@ pub struct StoredGroup {
 }
 
 impl StoredGroup {
-
     /// Make sure that `path` points to a valid dspfs folder structure (including a .dspfs subfolder)
     /// Without this, calling `reload()` will error. To make sure you are making a group correctly,
     /// use [Dspfs::new_group()](crate::dspfs::Dspfs::new_group)
@@ -34,7 +33,7 @@ impl StoredGroup {
         Self {
             uuid: Uuid::new_v4(),
             users: Vec::new(),
-            location: path.as_ref().to_path_buf()
+            location: path.as_ref().to_path_buf(),
         }
     }
 
@@ -54,25 +53,22 @@ pub struct Group<S> {
     pub stored_group: StoredGroup,
 
     group_store: SharedGroupStore,
-    global_store: SharedStore<S>
+    global_store: SharedStore<S>,
 }
 
 impl<S: Store> Group<S> {
-
     /// Opens the database in the database folder. Creates it if it didn't exist.
     fn open_db(db_folder: impl AsRef<Path>) -> Result<Arc<RwLock<Box<dyn GroupStore>>>> {
         enum DbType {
-            Heed
+            Heed,
         }
 
         // Somehow detect db type automatically
         let db_type = DbType::Heed;
 
-        Ok(Arc::new(RwLock::new(Box::new(
-            match db_type {
-                DbType::Heed => HeedGroupStore::new(db_folder.as_ref().join("heed.mdb"))?,
-            }
-        ))))
+        Ok(Arc::new(RwLock::new(Box::new(match db_type {
+            DbType::Heed => HeedGroupStore::new(db_folder.as_ref().join("heed.mdb"))?,
+        }))))
     }
 
     fn from_stored(stored_group: StoredGroup, global_store: SharedStore<S>) -> Result<Self> {
@@ -101,11 +97,17 @@ impl<S: Store> Group<S> {
     /// Adds a file to the group that exists locally on your filesystem.
     /// This function will hash the file, create a [File] struct and insert it.
     pub async fn index_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
-        let self_user = self.global_store.read().await.get_self_user()
+        let self_user = self
+            .global_store
+            .read()
+            .await
+            .get_self_user()
             .context("Could not get self user due to database error")?
             .context("Could not get self user")?;
 
-        let file = File::new(path.as_ref().to_path_buf()).await.context("Creating and indexing new file failed")?;
+        let file = File::new(path.as_ref().to_path_buf())
+            .await
+            .context("Creating and indexing new file failed")?;
 
         self.add_file(&self_user, file).await
     }
@@ -113,22 +115,35 @@ impl<S: Store> Group<S> {
     /// [add_file] adds a file to the relevant databases.
     /// This is the same as saying that we _know_ about this file.
     pub async fn add_file(&mut self, user: &PublicUser, file: File) -> Result<()> {
-        self.group_store.write().await.add_file(user, file).context("adding file to database went wrong")
+        self.group_store
+            .write()
+            .await
+            .add_file(user, file)
+            .context("adding file to database went wrong")
     }
 
     pub async fn get_local_file(&self, hash: Hash) -> Result<Option<File>> {
-        let self_user = self.global_store.read().await.get_self_user()
+        let self_user = self
+            .global_store
+            .read()
+            .await
+            .get_self_user()
             .context("Could not get self user due to database error")?
             .context("Could not get self user")?;
 
-        Ok(self.group_store.read().await.get_file(hash)?
+        Ok(self
+            .group_store
+            .read()
+            .await
+            .get_file(hash)?
             .map(|f| {
                 if f.is_owned_by(&self_user) {
                     None
                 } else {
                     Some(f)
                 }
-            }).flatten())
+            })
+            .flatten())
     }
 
     pub async fn get_block_contents(&self, hash: Hash, index: u64) -> Result<Option<Vec<u8>>> {
@@ -138,22 +153,29 @@ impl<S: Store> Group<S> {
             return Ok(None);
         };
 
-        let mut path = self.dspfs_folder().parent().context("invalid full dspfs folder path")?.to_path_buf();
+        let mut path = self
+            .dspfs_folder()
+            .parent()
+            .context("invalid full dspfs folder path")?
+            .to_path_buf();
         path.push(&file.path);
 
-
         // open file
-        let mut open_file = fs::File::open(path).await
-            .context("failed to open file")?;
+        let mut open_file = fs::File::open(path).await.context("failed to open file")?;
 
         // seek block start
-        open_file.seek(SeekFrom::Start(index * file.block_size)).await
+        open_file
+            .seek(SeekFrom::Start(index * file.block_size))
+            .await
             .context("this block doesn't exist in this file")?;
 
         let mut buffer = vec![0; file.block_size as usize];
 
         // read block to vec
-        let read_bytes = open_file.read(&mut buffer).await.context("reading the block failed")?;
+        let read_bytes = open_file
+            .read(&mut buffer)
+            .await
+            .context("reading the block failed")?;
         buffer.truncate(read_bytes);
 
         Ok(Some(buffer))

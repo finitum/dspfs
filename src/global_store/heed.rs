@@ -1,17 +1,17 @@
+use crate::fs::group::StoredGroup;
 use crate::global_store::{SharedStore, Store};
 use crate::user::PublicUser;
 use anyhow::{Context, Result};
 use heed::types::{SerdeBincode, UnalignedSlice, UnalignedType};
-use heed::{Env, EnvOpenOptions, PolyDatabase, Database};
+use heed::{Database, Env, EnvOpenOptions, PolyDatabase};
 use ring::pkcs8::Document;
 use ring::signature::Ed25519KeyPair;
 use std::ffi::OsStr;
 use std::fs;
-use std::path::{PathBuf, Path};
+use std::path::{Path, PathBuf};
+use uuid::Uuid;
 use zerocopy::AsBytes;
 use zerocopy::Unaligned;
-use crate::fs::group::StoredGroup;
-use uuid::Uuid;
 
 pub struct HeedStore {
     db_path: PathBuf,
@@ -121,20 +121,17 @@ impl Store for HeedStore {
 
         // See if the group already existed
         if self.groups_db.get(&wtxn, &group.uuid)?.is_some() {
-            return Err(anyhow::anyhow!("Can't create a group at a location in the filesystem which already has a group."));
+            return Err(anyhow::anyhow!(
+                "Can't create a group at a location in the filesystem which already has a group."
+            ));
         }
 
         // save the group
-        self.groups_db.put(
-            &mut wtxn,
-            &group.uuid,
-            &group,
-        )?;
+        self.groups_db.put(&mut wtxn, &group.uuid, &group)?;
         // And finally commit the changes.
         wtxn.commit()?;
 
         Ok(())
-
     }
 
     fn get_group(&self, uuid: Uuid) -> Result<Option<StoredGroup>> {
@@ -148,13 +145,17 @@ impl Store for HeedStore {
     fn get_groups(&self) -> Result<Vec<StoredGroup>> {
         let rtxn = self.env.read_txn()?;
 
-        let res = self.groups_db.iter(&rtxn)?.filter_map(|i| {
-           if let Ok((_path, group)) = i {
-                Some(group)
-            } else {
-               None
-           }
-        }).collect();
+        let res = self
+            .groups_db
+            .iter(&rtxn)?
+            .filter_map(|i| {
+                if let Ok((_path, group)) = i {
+                    Some(group)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         Ok(res)
     }
@@ -168,7 +169,9 @@ impl Store for HeedStore {
             wtxn.commit()?;
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Can't update a group which doesn't exist yet"))
+            Err(anyhow::anyhow!(
+                "Can't update a group which doesn't exist yet"
+            ))
         }
     }
 

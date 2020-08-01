@@ -1,6 +1,6 @@
-use tokio::net::{TcpStream, ToSocketAddrs, TcpListener};
-use tokio::io;
 use std::ops::Deref;
+use tokio::io;
+use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 
 pub struct HolepunchingTcpStream {
     stream: TcpStream,
@@ -20,14 +20,10 @@ impl HolepunchingTcpStream {
     }
 
     pub fn from_tokio(stream: tokio::net::TcpStream) -> io::Result<HolepunchingTcpStream> {
-        Ok(HolepunchingTcpStream {
-            stream,
-        })
+        Ok(HolepunchingTcpStream { stream })
     }
 
-    pub fn punch_hole(&self) {
-
-    }
+    pub fn punch_hole(&self) {}
 }
 
 impl Deref for HolepunchingTcpStream {
@@ -38,7 +34,6 @@ impl Deref for HolepunchingTcpStream {
     }
 }
 
-
 pub struct HolepunchingTcpListener {
     listener: TcpListener,
 }
@@ -46,7 +41,7 @@ pub struct HolepunchingTcpListener {
 impl HolepunchingTcpListener {
     pub async fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<HolepunchingTcpListener> {
         Ok(HolepunchingTcpListener {
-            listener: TcpListener::bind(addr).await?
+            listener: TcpListener::bind(addr).await?,
         })
     }
 
@@ -57,9 +52,6 @@ impl HolepunchingTcpListener {
     }
 
     pub fn from_tokio(listener: TcpListener) -> io::Result<HolepunchingTcpListener> {
-        Ok(HolepunchingTcpListener {
-            listener,
-        })
+        Ok(HolepunchingTcpListener { listener })
     }
-
 }

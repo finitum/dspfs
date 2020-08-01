@@ -1,9 +1,9 @@
 use crate::fs::file::File;
 use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use std::borrow::BorrowMut;
 use std::iter;
 use std::path::{Component, Components, Path, PathBuf};
-use std::borrow::BorrowMut;
-use serde::{Serialize, Deserialize};
 
 /// Normalizes a path (resolves .., .) correctly
 /// copied from [cargo](https://github.com/rust-lang/cargo/blob/fede83ccf973457de319ba6fa0e36ead454d2e20/src/cargo/util/paths.rs#L61)
@@ -44,7 +44,7 @@ pub enum FileTree {
     // A file
     Leaf {
         name: String,
-        file: File
+        file: File,
     },
 }
 
@@ -61,26 +61,31 @@ impl FileTree {
             FileTree::Node { children, .. } => {
                 Box::new(children.iter().map(|i| i.iter()).flatten())
             }
-            FileTree::Leaf{ name, file} => Box::new(iter::once((name.as_ref(), file))),
+            FileTree::Leaf { name, file } => Box::new(iter::once((name.as_ref(), file))),
         }
     }
 
-    pub fn iter_mut<'a>(&'a mut self) -> Box<dyn Iterator<Item = (&'a mut String, &'a mut File)> + 'a> {
+    pub fn iter_mut<'a>(
+        &'a mut self,
+    ) -> Box<dyn Iterator<Item = (&'a mut String, &'a mut File)> + 'a> {
         match self {
             FileTree::Node { children, .. } => {
                 Box::new(children.iter_mut().map(|i| i.iter_mut()).flatten())
             }
-            FileTree::Leaf{ name, file} => Box::new(iter::once((name, file))),
+            FileTree::Leaf { name, file } => Box::new(iter::once((name, file))),
         }
     }
 
     // TODO: Tests
-    fn traverse_tree_helper(root: &FileTree, components: &mut Components, mut path: Vec<usize>) -> Result<Vec<usize>> {
+    fn traverse_tree_helper(
+        root: &FileTree,
+        components: &mut Components,
+        mut path: Vec<usize>,
+    ) -> Result<Vec<usize>> {
         Ok(match &root {
             FileTree::Node { name: _, children } => match components.next() {
                 None => path,
                 Some(Component::Normal(part)) => {
-
                     let part = part.to_string_lossy().into_owned();
 
                     for (index, i) in children.iter().enumerate() {
@@ -88,25 +93,29 @@ impl FileTree {
                             FileTree::Node { name, .. } if name == &part => {
                                 path.push(index);
                                 return Self::traverse_tree_helper(i, components, path);
-                            },
+                            }
                             FileTree::Leaf { name, .. } if name == &part => {
                                 path.push(index);
                                 return Ok(path);
-                            },
+                            }
                             _ => (),
                         }
                     }
                     path
                 }
-                _ => return Err(anyhow::anyhow!("invalid path component"))
-            }
-            _ => path
+                _ => return Err(anyhow::anyhow!("invalid path component")),
+            },
+            _ => path,
         })
     }
 
     /// Will return the closest matching node of the filetree
     fn traverse_tree(&self, path: impl AsRef<Path>) -> Result<(&FileTree, usize)> {
-        let path = Self::traverse_tree_helper(&self, normalize_path(path.as_ref()).components().borrow_mut(), Vec::new())?;
+        let path = Self::traverse_tree_helper(
+            &self,
+            normalize_path(path.as_ref()).components().borrow_mut(),
+            Vec::new(),
+        )?;
 
         let len = path.len();
 
@@ -116,7 +125,9 @@ impl FileTree {
                 FileTree::Node { name: _, children } => {
                     curr = &children[i];
                 }
-                _ => unreachable!("This should exist, or otherwise the helper function doesn't work"),
+                _ => {
+                    unreachable!("This should exist, or otherwise the helper function doesn't work")
+                }
             }
         }
 
@@ -125,7 +136,11 @@ impl FileTree {
 
     /// The same as [traverse_tree] but it using and returning a mutable [FileTree]
     fn traverse_tree_mut(&mut self, path: impl AsRef<Path>) -> Result<(&mut FileTree, usize)> {
-        let path = Self::traverse_tree_helper(&self, normalize_path(path.as_ref()).components().borrow_mut(), Vec::new())?;
+        let path = Self::traverse_tree_helper(
+            &self,
+            normalize_path(path.as_ref()).components().borrow_mut(),
+            Vec::new(),
+        )?;
 
         let len = path.len();
 
@@ -135,7 +150,9 @@ impl FileTree {
                 FileTree::Node { name: _, children } => {
                     curr = &mut children[i];
                 }
-                _ => unreachable!("This should exist, or otherwise the helper function doesn't work"),
+                _ => {
+                    unreachable!("This should exist, or otherwise the helper function doesn't work")
+                }
             }
         }
 
@@ -181,21 +198,20 @@ impl FileTree {
 
         // Did we traverse the entire path
         if path.components().count() != len + 1 {
-            return None
+            return None;
         };
 
         match node {
-            FileTree::Node {name: _, children} => {
+            FileTree::Node { name: _, children } => {
                 let mut found: Option<usize> = None;
                 for (index, child) in children.iter().enumerate() {
-
                     match child {
-                        FileTree::Leaf {name, file: _} => {
+                        FileTree::Leaf { name, file: _ } => {
                             if name == &filename {
                                 found = Some(index);
                             }
                         }
-                        FileTree::Node {name, children: _} => {
+                        FileTree::Node { name, children: _ } => {
                             if recursive && name == &filename {
                                 found = Some(index);
                             }
@@ -205,10 +221,9 @@ impl FileTree {
 
                 found.map(|index| children.remove(index))
             }
-            _ => None
+            _ => None,
         }
     }
-
 
     /// Inserts a file into the filetree, with the `path` being a sequence of folders
     /// from te root of the filetree.
@@ -242,7 +257,8 @@ impl FileTree {
         let path = normalize_path(path.as_ref());
 
         let (mut node, len) = if let Some(path) = path.parent() {
-            self.traverse_tree_mut(path).context("finding closest filetree node went wrong")?
+            self.traverse_tree_mut(path)
+                .context("finding closest filetree node went wrong")?
         } else {
             (self, 1)
         };
@@ -256,21 +272,26 @@ impl FileTree {
             for c in path.components().skip(len) {
                 let folder = FileTree::Node {
                     children: Vec::new(),
-                    name: c.as_os_str().to_string_lossy().into_owned()
+                    name: c.as_os_str().to_string_lossy().into_owned(),
                 };
-                if let FileTree::Node { name: _, children} = node {
+                if let FileTree::Node { name: _, children } = node {
                     children.push(folder);
                     node = children.last_mut().unwrap();
                 }
             }
         }
 
-        if let FileTree::Node { name: _, children} = node {
-            let leaf = FileTree::Leaf{ name: filename,  file };
+        if let FileTree::Node { name: _, children } = node {
+            let leaf = FileTree::Leaf {
+                name: filename,
+                file,
+            };
 
             children.push(leaf);
         } else {
-            return Err(anyhow::anyhow!("path pointed to file, can't insert a file in a non directory."))
+            return Err(anyhow::anyhow!(
+                "path pointed to file, can't insert a file in a non directory."
+            ));
         }
 
         Ok(())
@@ -296,7 +317,10 @@ mod tests {
                 name: "".into(),
                 children: vec![Node {
                     name: "yeet".into(),
-                    children: vec![Leaf{name: "yeet.txt".into(), file},],
+                    children: vec![Leaf {
+                        name: "yeet.txt".into(),
+                        file
+                    },],
                 },],
             }
         );
@@ -313,7 +337,10 @@ mod tests {
         let found = f.find("yeet/yeet.txt").unwrap();
         assert_eq!(
             found,
-            &Leaf{name: "yeet.txt".into(), file}
+            &Leaf {
+                name: "yeet.txt".into(),
+                file
+            }
         );
     }
 
@@ -325,7 +352,11 @@ mod tests {
 
         f.insert("yeet/yeet.txt", file.clone()).unwrap();
         let node = f.delete("yeet/yeet.txt", false).unwrap();
-        if let Leaf {name: fname, file: ffile} = node {
+        if let Leaf {
+            name: fname,
+            file: ffile,
+        } = node
+        {
             assert_eq!(fname, "yeet.txt");
             assert_eq!(ffile, file);
         } else {
@@ -373,10 +404,13 @@ mod tests {
         let result = f.traverse_tree("test.txt").unwrap();
 
         assert_eq!(result.1, 1);
-        assert_eq!(result.0, &Leaf {
-            name: "test.txt".to_string(),
-            file
-        })
+        assert_eq!(
+            result.0,
+            &Leaf {
+                name: "test.txt".to_string(),
+                file
+            }
+        )
     }
 
     #[test]
@@ -393,7 +427,7 @@ mod tests {
 
         match n {
             FileTree::Node { name, .. } => assert_eq!(name, "yote"),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
@@ -411,7 +445,7 @@ mod tests {
 
         match n {
             FileTree::Node { name, .. } => assert_eq!(name, "yote"),
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 
@@ -423,11 +457,17 @@ mod tests {
             name: "".into(),
             children: vec![Node {
                 name: "yeet".into(),
-                children: vec![Leaf{name: "yeet.txt".into(), file: file.clone()}],
+                children: vec![Leaf {
+                    name: "yeet.txt".into(),
+                    file: file.clone(),
+                }],
             }],
         };
 
-        assert_eq!(vec![&file], t.iter().map(|(_, i)| i).collect::<Vec<&File>>())
+        assert_eq!(
+            vec![&file],
+            t.iter().map(|(_, i)| i).collect::<Vec<&File>>()
+        )
     }
 
     #[test]
@@ -446,7 +486,10 @@ mod tests {
                     name: "yeet".into(),
                     children: vec![Node {
                         name: "yeet".into(),
-                        children: vec![Leaf{name: "yeet.txt".into(), file}],
+                        children: vec![Leaf {
+                            name: "yeet.txt".into(),
+                            file
+                        }],
                     },],
                 },],
             }
@@ -471,11 +514,17 @@ mod tests {
                     children: vec![
                         Node {
                             name: "yote".into(),
-                            children: vec![FileTree::Leaf{name: "yeet.txt".into(), file: file.clone()}],
+                            children: vec![FileTree::Leaf {
+                                name: "yeet.txt".into(),
+                                file: file.clone()
+                            }],
                         },
                         Node {
                             name: "yeet".into(),
-                            children: vec![FileTree::Leaf{name: "yeet.txt".into(), file}],
+                            children: vec![FileTree::Leaf {
+                                name: "yeet.txt".into(),
+                                file
+                            }],
                         },
                     ],
                 },],
@@ -517,12 +566,10 @@ mod tests {
                 },
                 Node {
                     name: "yeet".to_string(),
-                    children: vec![
-                        Leaf {
-                            name: "yeet.txt".to_string(),
-                            file
-                        },
-                    ],
+                    children: vec![Leaf {
+                        name: "yeet.txt".to_string(),
+                        file,
+                    }],
                 },
             ],
         };
@@ -533,8 +580,10 @@ mod tests {
     #[test]
     pub fn test_leaf_err() {
         let file = File::new_empty("None".into());
-        let mut f = FileTree::Leaf{name: "yeet.txt".into(), file: file.clone()};
+        let mut f = FileTree::Leaf {
+            name: "yeet.txt".into(),
+            file: file.clone(),
+        };
         assert!(f.insert("some path", file).is_err());
     }
 }
-

@@ -1,11 +1,11 @@
-use crate::user::PublicUser;
 use crate::fs::hash::{Hash, HashingAlgorithm, BLOCK_HASHING_ALGORITHM};
+use crate::user::PublicUser;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use serde::{Serialize, Deserialize};
 use std::path::PathBuf;
-use anyhow::{Result, Context};
-use tokio::io::AsyncReadExt;
 use tokio::fs::File as tFile;
+use tokio::io::AsyncReadExt;
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct File {
@@ -23,7 +23,6 @@ pub struct File {
     /// If it does, the file will be recognized as a different file with a different hash
     pub(crate) block_size: u64,
 
-
     /// Hashes of each block in the file. In the same order as the blocks appear in the file.
     blockhashes: Vec<Hash>,
 
@@ -32,7 +31,6 @@ pub struct File {
     /// Only when we ask this user for the file and it turns out they don't have it anymore,
     /// do we remove him from this set.
     users: HashSet<PublicUser>,
-
     // TODO:
     // modtime
 }
@@ -43,7 +41,8 @@ impl File {
     /// new_empty creates a new File from a path as if the file is empty
     pub(crate) fn new_empty(path: PathBuf) -> Self {
         let block_hash = Hash::hash_block(BLOCK_HASHING_ALGORITHM, &[]);
-        let file_hash = Hash::hash_block_hashes(BLOCK_HASHING_ALGORITHM, vec![block_hash.clone()].as_ref());
+        let file_hash =
+            Hash::hash_block_hashes(BLOCK_HASHING_ALGORITHM, vec![block_hash.clone()].as_ref());
 
         Self {
             path,
@@ -51,7 +50,7 @@ impl File {
             hashing_algorithm: BLOCK_HASHING_ALGORITHM,
             block_size: block_size(0),
             blockhashes: vec![block_hash],
-            users: HashSet::new()
+            users: HashSet::new(),
         }
     }
 
@@ -59,12 +58,10 @@ impl File {
     /// relevant metadata.
     pub async fn new(path: PathBuf) -> Result<Self> {
         // 1. Open file
-        let mut file = tFile::open(&path).await
-            .context("Couldn't open file")?;
+        let mut file = tFile::open(&path).await.context("Couldn't open file")?;
 
         // 2. Divide into blocks
-        let metadata = file.metadata().await
-            .context("Couldn't access metadata")?;
+        let metadata = file.metadata().await.context("Couldn't access metadata")?;
 
         // 2.1 determine block size
         let file_size = metadata.len();
@@ -77,19 +74,23 @@ impl File {
         let (file_hash, block_hashes) = Self::hash_file(&mut file, block_size).await?;
 
         // 5. Create File
-        Ok(Self{
+        Ok(Self {
             path,
             hash: file_hash,
             hashing_algorithm: BLOCK_HASHING_ALGORITHM,
             block_size,
             blockhashes: block_hashes,
-            users: Default::default()
+            users: Default::default(),
         })
     }
 
     /// Hashes a filesystem file given a specified block_size, returns hash and block_level hashes
     async fn hash_file(file: &mut tFile, block_size: u64) -> Result<(Hash, Vec<Hash>)> {
-        let file_size = file.metadata().await.context("retrieving metadata failed")?.len();
+        let file_size = file
+            .metadata()
+            .await
+            .context("retrieving metadata failed")?
+            .len();
         // 1 + ((x - 1) / y)
         let numblocks = 1 + ((file_size - 1) / block_size);
         let last_block_len = file_size - ((numblocks - 1) * block_size);
@@ -99,16 +100,22 @@ impl File {
         let mut block_hashes = Vec::with_capacity(numblocks as usize);
 
         for _ in 0..(numblocks - 1) {
-            file.read_exact(&mut buffer).await.context("reading block from file failed")?;
+            file.read_exact(&mut buffer)
+                .await
+                .context("reading block from file failed")?;
             block_hashes.push(Hash::hash_block(BLOCK_HASHING_ALGORITHM, &buffer));
         }
 
         let mut buffer = vec![0u8; last_block_len as usize];
-        file.read_exact(&mut buffer).await.context("reading block from file failed")?;
+        file.read_exact(&mut buffer)
+            .await
+            .context("reading block from file failed")?;
         block_hashes.push(Hash::hash_block(BLOCK_HASHING_ALGORITHM, &buffer));
 
         if block_hashes.len() as u64 != numblocks {
-            return Err(anyhow::anyhow!("number of hashes mismatches of number of blocks"));
+            return Err(anyhow::anyhow!(
+                "number of hashes mismatches of number of blocks"
+            ));
         }
 
         // 4. hash blockhashes for file hash
@@ -119,7 +126,9 @@ impl File {
     /// Rehashes this file, to be used if the file changes.
     pub async fn rehash(&mut self) -> Result<()> {
         // 1. Open File
-        let mut file = tFile::open(&self.path).await.context("opening file failed")?;
+        let mut file = tFile::open(&self.path)
+            .await
+            .context("opening file failed")?;
         // 2. Call hash_file
         let (file_hash, block_hashes) = Self::hash_file(&mut file, self.block_size).await?;
         // 3. save new info
@@ -134,7 +143,7 @@ impl File {
     }
 
     pub fn num_owning_users(&self) -> usize {
-         self.users.len()
+        self.users.len()
     }
 
     /// Returns true if two file structs refer to the same file.
