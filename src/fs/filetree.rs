@@ -329,7 +329,7 @@ mod tests {
             assert_eq!(fname, "yeet.txt");
             assert_eq!(ffile, file);
         } else {
-            assert!(false)
+            unreachable!()
         }
 
         assert_eq!(
@@ -350,7 +350,7 @@ mod tests {
 
         let file = File::new_empty("None".into());
 
-        f.insert("yeet/yeet.txt", file.clone()).unwrap();
+        f.insert("yeet/yeet.txt", file).unwrap();
         f.delete("yeet", true).unwrap();
 
         assert_eq!(
@@ -375,7 +375,7 @@ mod tests {
         assert_eq!(result.1, 1);
         assert_eq!(result.0, &Leaf {
             name: "test.txt".to_string(),
-            file: file.clone()
+            file
         })
     }
 
@@ -387,13 +387,13 @@ mod tests {
 
         f.insert("yeet.txt", file.clone()).unwrap();
         f.insert("yeet/yote.txt", file.clone()).unwrap();
-        f.insert("yeet/yote/yoinks.txt", file.clone()).unwrap();
+        f.insert("yeet/yote/yoinks.txt", file).unwrap();
 
         let (n, _) = f.traverse_tree("yeet/yote").unwrap();
 
         match n {
             FileTree::Node { name, .. } => assert_eq!(name, "yote"),
-            _ => assert!(false)
+            _ => unreachable!()
         }
     }
 
@@ -405,13 +405,13 @@ mod tests {
 
         f.insert("yeet.txt", file.clone()).unwrap();
         f.insert("yeet/yote.txt", file.clone()).unwrap();
-        f.insert("yeet/yote/yoinks.txt", file.clone()).unwrap();
+        f.insert("yeet/yote/yoinks.txt", file).unwrap();
 
         let (n, _): (&mut FileTree, _) = f.traverse_tree_mut("yeet/yote").unwrap();
 
         match n {
             FileTree::Node { name, .. } => assert_eq!(name, "yote"),
-            _ => assert!(false)
+            _ => unreachable!()
         }
     }
 
@@ -475,7 +475,7 @@ mod tests {
                         },
                         Node {
                             name: "yeet".into(),
-                            children: vec![FileTree::Leaf{name: "yeet.txt".into(), file: file.clone()}],
+                            children: vec![FileTree::Leaf{name: "yeet.txt".into(), file}],
                         },
                     ],
                 },],
@@ -520,7 +520,7 @@ mod tests {
                     children: vec![
                         Leaf {
                             name: "yeet.txt".to_string(),
-                            file: file.clone()
+                            file
                         },
                     ],
                 },

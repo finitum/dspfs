@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Clippy" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="channel" value="DEFAULT" />
-    <option name="command" value="clippy" />
+    <option name="command" value="clippy --all-targets --all-features -- -D warnings " />
     <option name="allFeatures" value="true" />
     <option name="emulateTerminal" value="false" />
     <option name="backtrace" value="SHORT" />
