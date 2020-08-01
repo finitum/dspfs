@@ -18,6 +18,14 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+
+/// A *StoredGroup* is a reduced version of a [Group], which can safely be stored in a database.
+/// For documentation on what a DSPFS *Group* is, refer to the documentation of [Group].
+/// A stored group can be *reloaded* to allow it to be used as a regular [Group] again. Only regular
+/// groups can perform actions that need to be reflected in the database. Some actions require the
+/// database to be available, and these actions are therefore only available on loaded [Group]s.
+///
+/// All operations supported on *StoredGroup*s are also available on loaded [Group]s.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoredGroup {
     pub uuid: Uuid,
@@ -48,6 +56,27 @@ impl StoredGroup {
     }
 }
 
+/// A Group is a structure which represents a folder on your computer which is shared through DSPFS.
+/// A group is attached to a folder in your local filesystem, and stores it's data in the `.dspfs`
+/// folder located in the folder the group is attached to. This folder is also called the root of a
+/// dspfs group.
+///
+/// A dspfs group structure can be either loaded or stored. Only loaded groups can perform actions
+/// concerning the database. For more information about stored groups, refer to the documentation of
+/// the [StoredGroup] struct.
+///
+/// Each group can have a number of members. Members all have their own computers, and all files and
+/// folders withing a dspfs group, are shared with all other members of that group. A group
+/// is attached to a folder in your local filesystem, and files and folders below this attachment point
+/// can be shared using dspfs. These files do not necessarily have to have the same name and location in
+/// your filesystem, as other members in the group have that same file in their filesystem. However,
+/// using dspfs it is possible to browse other peoples filesystem (the folder they attached their group to)
+/// and to download files you want.
+///
+/// Warning: files you add to the dspfs group can be seen by other people in the group. This is the
+/// purpose of dspfs. However, make sure not to put information in a dspfs group you like to
+/// remain secret from other members in the group.
+/// TODO: It will be possible to exclude folders in this directory from being shared.
 #[derive(Clone)]
 pub struct Group<S> {
     pub stored_group: StoredGroup,
