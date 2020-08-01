@@ -3,9 +3,10 @@
 use log::*;
 use std::error::Error;
 
-mod error;
+mod dspfs;
+mod fs;
+mod global_store;
 mod message;
-mod store;
 mod stream;
 mod user;
 
@@ -21,7 +22,7 @@ fn init() {
 async fn main() -> Result<(), Box<dyn Error>> {
     init();
 
-    let _store = store::inmemory::InMemory::default();
+    let _store = global_store::inmemory::InMemoryStore::default();
 
     // Run program
     info!("Hello world!");

@@ -1,9 +1,10 @@
-use crate::error::DspfsError;
-use crate::store::Store;
-use crate::user::{PublicKey, PublicUser};
+use crate::global_store::Store;
+use crate::user::PublicUser;
+use anyhow::{Context, Result};
 use ring::pkcs8::Document;
 use ring::rand;
 use ring::signature::Ed25519KeyPair;
+use std::convert::TryInto;
 use std::ops::{Deref, DerefMut};
 
 pub struct PrivateUser {
@@ -16,14 +17,16 @@ pub struct PrivateUser {
 
 impl PrivateUser {
     /// Creates a new user, generates a new keypair for them.
-    pub fn new(username: &str) -> Result<(Self, Document), DspfsError> {
+    pub fn new(username: &str) -> Result<(Self, Document)> {
         let rng = rand::SystemRandom::new();
-        let pkcs8_bytes = Ed25519KeyPair::generate_pkcs8(&rng)?;
-        let keypair = Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref())?;
+        let pkcs8_bytes = Ed25519KeyPair::generate_pkcs8(&rng)
+            .map_err(|_| anyhow::anyhow!("unspecified ring error"))?;
+        let keypair = Ed25519KeyPair::from_pkcs8(pkcs8_bytes.as_ref())
+            .map_err(|_| anyhow::anyhow!("key rejected error"))?;
 
         Ok((
             Self {
-                public_user: PublicUser::new(PublicKey::from(&keypair), username),
+                public_user: PublicUser::new((&keypair).try_into()?, username),
                 keypair,
             },
             pkcs8_bytes,
@@ -38,18 +41,16 @@ impl PrivateUser {
         &self.public_user
     }
 
-    pub fn load_from_store(store: &dyn Store) -> Result<Self, DspfsError> {
+    pub fn load_from_store<S: Store>(store: &S) -> Result<Self> {
         Ok(Self {
-            public_user: store.get_self_user().clone().ok_or_else(|| {
-                DspfsError::NotFoundInStore(
-                    "Could not load private user from store: Self user not found".into(),
-                )
-            })?,
-            keypair: store.get_signing_key().ok_or_else(|| {
-                DspfsError::NotFoundInStore(
-                    "Could not load private user from store: Self user not found".into(),
-                )
-            })??,
+            public_user: store
+                .get_self_user()
+                .context("couldn't load from global_store")?
+                .context("user not found in global_store")?,
+            keypair: store
+                .get_signing_key()
+                .context("couldn't load key from global_store")?
+                .context("signing key not present int global_store")?,
         })
     }
 }
