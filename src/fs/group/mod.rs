@@ -18,7 +18,6 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-
 /// A *StoredGroup* is a reduced version of a [Group], which can safely be stored in a database.
 /// For documentation on what a DSPFS *Group* is, refer to the documentation of [Group].
 /// A stored group can be *reloaded* to allow it to be used as a regular [Group] again. Only regular
