@@ -22,15 +22,17 @@ pub struct HeedStore {
 
 impl HeedStore {
     pub fn new_or_load(path: impl AsRef<Path>) -> Result<Self> {
-        if path.as_ref().extension() != Some(OsStr::new(".mdb")) {
+        if path.as_ref().extension() != Some(OsStr::new("mdb")) {
             return Err(anyhow::anyhow!("Invalid db file extension (must be .mdb)"));
         }
 
         fs::create_dir_all(&path)?;
-        let env = EnvOpenOptions::new().open(&path)?;
+        let mut env_opts = EnvOpenOptions::new();
+        env_opts.max_dbs(2);
+        let env = env_opts.open(&path)?;
 
         let main_db = env.create_poly_database(None)?;
-        let groups_db = env.create_database(None)?;
+        let groups_db = env.create_database(Some("groups"))?;
 
         Ok(Self {
             db_path: path.as_ref().to_path_buf(),
