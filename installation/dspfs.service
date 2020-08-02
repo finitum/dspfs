@@ -1,0 +1,11 @@
+[Unit]
+Description=dspfs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/dspfs
+
+[Install]
+WantedBy=default.target
