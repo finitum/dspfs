@@ -2,15 +2,23 @@ use crate::fs::hash::{Hash, HashingAlgorithm, BLOCK_HASHING_ALGORITHM};
 use crate::user::PublicUser;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use tokio::fs::File as tFile;
 use tokio::io::AsyncReadExt;
 
+/// For documentation on fields, refer to the [File] struct
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
+pub struct SimpleFile {
+    pub path: PathBuf,
+    pub hash: Hash,
+    pub users: BTreeSet<PublicUser>,
+    pub file_size: u64,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct File {
     /// filename/location locally relative to group root.
-    /// If this variant is None, then this user is guaranteed not to be in the file's user list.
     pub path: PathBuf,
 
     /// Hash of the entire file
@@ -23,6 +31,8 @@ pub struct File {
     /// If it does, the file will be recognized as a different file with a different hash
     pub(crate) block_size: u64,
 
+    pub file_size: u64,
+
     /// Hashes of each block in the file. In the same order as the blocks appear in the file.
     blockhashes: Vec<Hash>,
 
@@ -30,7 +40,7 @@ pub struct File {
     /// we learn that someone has a file, either from them directly or from someone else.
     /// Only when we ask this user for the file and it turns out they don't have it anymore,
     /// do we remove him from this set.
-    users: HashSet<PublicUser>,
+    users: BTreeSet<PublicUser>,
     // TODO:
     // modtime
 }
@@ -50,7 +60,18 @@ impl File {
             hashing_algorithm: BLOCK_HASHING_ALGORITHM,
             block_size: block_size(0),
             blockhashes: vec![block_hash],
-            users: HashSet::new(),
+            users: BTreeSet::new(),
+            file_size: 0,
+        }
+    }
+
+    /// TODO: maybe avoid cloning everything here
+    pub fn simplify(&self) -> SimpleFile {
+        SimpleFile {
+            path: self.path.clone(),
+            hash: self.hash.clone(),
+            users: self.users.clone(),
+            file_size: self.file_size,
         }
     }
 
@@ -76,6 +97,7 @@ impl File {
         // 5. Create File
         Ok(Self {
             path,
+            file_size,
             hash: file_hash,
             hashing_algorithm: BLOCK_HASHING_ALGORITHM,
             block_size,

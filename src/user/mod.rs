@@ -8,7 +8,9 @@ use ring::signature::{Ed25519KeyPair, KeyPair, UnparsedPublicKey, ED25519};
 use serde::export::TryFrom;
 use zerocopy::{AsBytes, LayoutVerified};
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq, Debug, AsBytes)]
+#[derive(
+    serde::Serialize, serde::Deserialize, Clone, Eq, PartialEq, Debug, AsBytes, Ord, PartialOrd,
+)]
 #[repr(packed)]
 pub struct PublicKey(pub(self) [u8; 32]);
 
