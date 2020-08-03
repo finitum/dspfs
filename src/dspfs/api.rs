@@ -1,18 +1,18 @@
-use crate::user::PublicUser;
 use crate::fs::hash::Hash;
+use crate::user::PublicUser;
 
-use std::path::Path;
-use uuid::Uuid;
-use anyhow::Result;
 use crate::fs::file::SimpleFile;
+use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::{HashSet, BTreeSet};
-use std::time::SystemTime;
-use std::fs::DirEntry;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashSet};
 use std::ffi::OsString;
-use serde::{Serialize,Deserialize};
+use std::fs::DirEntry;
+use std::path::Path;
+use std::time::SystemTime;
+use uuid::Uuid;
 
-#[derive(Serialize,Deserialize,Debug,Clone, Eq, PartialEq, Hash)]
+#[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq, Hash)]
 pub struct LocalFile {
     name: OsString,
     modtime: SystemTime,
@@ -37,7 +37,7 @@ impl LocalFile {
 pub trait Api {
     /// Equivalent of `git init`. Creates a new group with only you in it.
     async fn init_group(&self, path: &Path) -> Result<Uuid>;
-    
+
     /// Equivalent of `git add`. Adds a file to the group and makes it visible for others in the group.
     async fn add_file(&self, guuid: Uuid, path: &Path) -> Result<SimpleFile>;
 
@@ -54,13 +54,20 @@ pub trait Api {
     async fn get_available_files(&self, guuid: Uuid, path: &Path) -> Result<HashSet<LocalFile>>;
 
     /// gets a certain level of filetree as seen by another user
-    async fn get_files(&self, guuid: Uuid, user: &PublicUser, path: &Path) -> Result<HashSet<SimpleFile>>;
+    async fn get_files(
+        &self,
+        guuid: Uuid,
+        user: &PublicUser,
+        path: &Path,
+    ) -> Result<HashSet<SimpleFile>>;
 
     /// requests a file from other users in the group
     async fn request_file(&self, hash: Hash, to: &Path) -> Result<()>;
 
     /// Lists current download/uploads.
-    async fn status(&self) {todo!()}
+    async fn status(&self) {
+        todo!()
+    }
 
     /// Refreshes internal state.
     /// may do any of the following things:
@@ -69,11 +76,8 @@ pub trait Api {
     ///  * Check for new files from other users.
     async fn refresh(&self);
 
-
     // TODO:
     async fn add_folder(&self, guuid: Uuid, path: &Path) -> Result<()> {
         todo!()
     }
 }
-
-

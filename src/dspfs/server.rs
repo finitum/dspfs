@@ -10,7 +10,7 @@ use tokio::net::{TcpListener, ToSocketAddrs};
 use tokio::select;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
-pub struct Server<S: Store + 'static> {
+pub struct Server<S> {
     listener: TcpListener,
     store: SharedStore<S>,
     pub addr: SocketAddr,

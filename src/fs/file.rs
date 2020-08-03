@@ -65,7 +65,6 @@ impl File {
         }
     }
 
-
     /// TODO: maybe avoid cloning everything here
     pub fn simplify(&self) -> SimpleFile {
         SimpleFile {

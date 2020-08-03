@@ -2,6 +2,7 @@ mod heed;
 mod store;
 
 use crate::fs::file::{File, SimpleFile};
+use crate::fs::filetree::FileTree;
 use crate::fs::group::heed::HeedGroupStore;
 use crate::fs::group::store::{GroupStore, SharedGroupStore};
 use crate::fs::hash::Hash;
@@ -9,6 +10,7 @@ use crate::global_store::{SharedStore, Store};
 use crate::user::PublicUser;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeSet, HashSet};
 use std::io::SeekFrom;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -17,8 +19,6 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
 use uuid::Uuid;
-use std::collections::{BTreeSet, HashSet};
-use crate::fs::filetree::FileTree;
 
 /// A *StoredGroup* is a reduced version of a [Group], which can safely be stored in a database.
 /// For documentation on what a DSPFS *Group* is, refer to the documentation of [Group].
@@ -221,30 +221,28 @@ impl<S: Store> Group<S> {
 
     /// Returns all files in the directory pointed to by path, from a certain user.
     /// This function only returns the files directly in that folder, and not recursively.
-    pub async fn get_files_from_user(&self, user: &PublicUser, path: &Path) -> Result<HashSet<SimpleFile>> {
+    pub async fn get_files_from_user(
+        &self,
+        user: &PublicUser,
+        path: &Path,
+    ) -> Result<HashSet<SimpleFile>> {
         let filetree = self.group_store.read().await.get_filetree(user)?;
 
-        let dir = filetree.find(path)
-            .context("no file exists at this path")?;
+        let dir = filetree.find(path).context("no file exists at this path")?;
 
         Ok(match dir {
             FileTree::Leaf { file, .. } => {
                 let mut hs = HashSet::new();
                 hs.insert(file.simplify());
                 hs
-            },
-            FileTree::Node { children, .. } => {
-                children.iter()
-                    .map(|node| match node {
-                        FileTree::Leaf { file, .. } => {
-                            file.simplify()
-                        },
-                        FileTree::Node { .. } => {
-                            todo!()
-                        },
-                    })
-                    .collect()
-            },
+            }
+            FileTree::Node { children, .. } => children
+                .iter()
+                .map(|node| match node {
+                    FileTree::Leaf { file, .. } => file.simplify(),
+                    FileTree::Node { .. } => todo!(),
+                })
+                .collect(),
         })
     }
 }

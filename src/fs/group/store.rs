@@ -1,10 +1,10 @@
 use crate::fs::file::File;
+use crate::fs::filetree::FileTree;
 use crate::fs::hash::Hash;
 use crate::user::PublicUser;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::fs::filetree::FileTree;
 
 /// Thread safe group store
 pub type SharedGroupStore = Arc<RwLock<Box<dyn GroupStore>>>;

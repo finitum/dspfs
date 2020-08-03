@@ -73,7 +73,9 @@ impl GroupStore for HeedGroupStore {
     fn list_files(&self) -> Result<Vec<File>> {
         let rtxn = self.env.read_txn()?;
 
-        let files = self.files.iter(&rtxn)?
+        let files = self
+            .files
+            .iter(&rtxn)?
             .map(|i| i.map(|(_hash, file)| file))
             .flatten()
             .collect();
@@ -88,8 +90,7 @@ impl GroupStore for HeedGroupStore {
             .filetrees
             .get(&rtxn, user)
             .context("error getting filetree from db")?
-            .context("no filetree found for this user")?
-        )
+            .context("no filetree found for this user")?)
     }
 
     fn delete_file(&mut self, user: &PublicUser, file: &File) -> Result<()> {

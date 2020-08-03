@@ -1,42 +1,43 @@
 use crate::dspfs::builder::DspfsBuilder;
 use crate::dspfs::client::Client;
 use crate::dspfs::server::{Server, ServerHandle};
+use crate::fs::file::File;
+use crate::fs::file::SimpleFile;
 use crate::fs::group::StoredGroup;
+use crate::fs::hash::Hash;
 use crate::global_store::{SharedStore, Store};
 use crate::user::{PrivateUser, PublicUser};
-use anyhow::{Result, Context};
+use anyhow::{Context, Result};
+use api::Api;
+use api::LocalFile;
+use async_trait::async_trait;
 use log::*;
-use std::collections::{HashMap, HashSet, BTreeSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::mem;
 use std::path::Path;
 use uuid::Uuid;
-use crate::fs::file::SimpleFile;
-use crate::fs::file::File;
-use crate::fs::hash::Hash;
-use async_trait::async_trait;
-use api::LocalFile;
-use api::Api;
 
+pub mod api;
 pub mod builder;
 pub mod client;
 pub mod server;
-pub mod api;
 
-pub struct Dspfs<S: Store + 'static> {
+pub struct Dspfs<S> {
     pub(self) store: SharedStore<S>,
-    pub(self) me: PrivateUser,
     pub(self) server: Option<Server<S>>,
 
     clients: HashMap<PublicUser, Client>,
     serverhandle: Option<ServerHandle>,
 }
 
-impl<S: Store> Dspfs<S> {
+impl<S> Dspfs<S> {
     pub fn builder() -> DspfsBuilder {
         DspfsBuilder::new()
     }
+}
 
+impl<S: Store + 'static> Dspfs<S> {
     pub async fn start(&mut self) {
         if self.server.is_some() {
             if let Some(server) = mem::replace(&mut self.server, None) {
@@ -63,7 +64,6 @@ impl<S: Store> Dspfs<S> {
     }
 }
 
-
 #[async_trait]
 impl<S: Store> Api for Dspfs<S> {
     async fn init_group(&self, path: &Path) -> Result<Uuid> {
@@ -82,8 +82,13 @@ impl<S: Store> Api for Dspfs<S> {
     }
 
     async fn add_file(&self, guuid: Uuid, path: &Path) -> Result<SimpleFile> {
-        let mut group = self.store.read().await.get_group(guuid)?
-            .context("There is no group with this uuid.")?.reload(self.store.clone())?;
+        let mut group = self
+            .store
+            .read()
+            .await
+            .get_group(guuid)?
+            .context("There is no group with this uuid.")?
+            .reload(self.store.clone())?;
 
         let us = self.store.read().await.get_self_user()?.context("")?;
 
@@ -91,15 +96,17 @@ impl<S: Store> Api for Dspfs<S> {
         location.push(path);
 
         if !location.is_file() {
-            return Err(anyhow::anyhow!("Path does not point to a file"))
+            return Err(anyhow::anyhow!("Path does not point to a file"));
         }
 
-        let file = File::new(location).await
-            .context("Indexing file failed")?;
+        let file = File::new(location).await.context("Indexing file failed")?;
 
         let simple_file = file.simplify();
 
-        group.add_file(&us, file).await.context("Adding file to group failed")?;
+        group
+            .add_file(&us, file)
+            .await
+            .context("Adding file to group failed")?;
 
         Ok(simple_file)
     }
@@ -109,41 +116,64 @@ impl<S: Store> Api for Dspfs<S> {
     }
 
     async fn list_files(&self, guuid: Uuid) -> Result<HashSet<SimpleFile>> {
-        let group = self.store.read().await.get_group(guuid)?
-            .context("There is no group with this uuid.")?.reload(self.store.clone())?;
+        let group = self
+            .store
+            .read()
+            .await
+            .get_group(guuid)?
+            .context("There is no group with this uuid.")?
+            .reload(self.store.clone())?;
 
-        let f = group.list_files().await?
-            .into_iter()
-            .map(|f| f.simplify());
+        let f = group.list_files().await?.into_iter().map(|f| f.simplify());
 
         Ok(f.collect())
     }
 
     async fn get_users(&self, guuid: Uuid) -> Result<BTreeSet<PublicUser>> {
-        let group = self.store.read().await.get_group(guuid)?
+        let group = self
+            .store
+            .read()
+            .await
+            .get_group(guuid)?
             .context("There is no group with this uuid.")?;
 
         Ok(group.users)
     }
 
     async fn get_available_files(&self, guuid: Uuid, path: &Path) -> Result<HashSet<LocalFile>> {
-        let group = self.store.read().await.get_group(guuid)?
+        let group = self
+            .store
+            .read()
+            .await
+            .get_group(guuid)?
             .context("There is no group with this uuid.")?;
 
         let mut location = group.dspfs_root().to_path_buf();
         location.push(path);
 
-        let set = location.read_dir().context("Reading directory failed")?
-            .map(|i| i.map(|direntry| {
-                LocalFile::from_direntry(direntry)
-            })).flatten().collect::<Result<_>>()?;
+        let set = location
+            .read_dir()
+            .context("Reading directory failed")?
+            .map(|i| i.map(|direntry| LocalFile::from_direntry(direntry)))
+            .flatten()
+            .collect::<Result<_>>()?;
 
         Ok(set)
     }
 
-    async fn get_files(&self, guuid: Uuid, user: &PublicUser, path: &Path) -> Result<HashSet<SimpleFile>> {
-        let group = self.store.read().await.get_group(guuid)?
-            .context("There is no group with this uuid.")?.reload(self.store.clone())?;
+    async fn get_files(
+        &self,
+        guuid: Uuid,
+        user: &PublicUser,
+        path: &Path,
+    ) -> Result<HashSet<SimpleFile>> {
+        let group = self
+            .store
+            .read()
+            .await
+            .get_group(guuid)?
+            .context("There is no group with this uuid.")?
+            .reload(self.store.clone())?;
 
         let files = group.get_files_from_user(user, path).await;
 
@@ -158,5 +188,3 @@ impl<S: Store> Api for Dspfs<S> {
         unimplemented!()
     }
 }
-
-
