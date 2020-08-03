@@ -219,7 +219,7 @@ pub mod tests {
 
         // Create group
         let mut group = StoredGroup::new(path.clone());
-        group.users.push(us.public_user().clone());
+        group.users.insert(us.public_user().clone());
         let guuid = group.uuid;
 
         std::fs::create_dir_all(group.dspfs_folder()).unwrap();
