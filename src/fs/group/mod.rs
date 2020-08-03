@@ -1,7 +1,7 @@
 mod heed;
 mod store;
 
-use crate::fs::file::File;
+use crate::fs::file::{File, SimpleFile};
 use crate::fs::group::heed::HeedGroupStore;
 use crate::fs::group::store::{GroupStore, SharedGroupStore};
 use crate::fs::hash::Hash;
@@ -17,6 +17,8 @@ use tokio::fs;
 use tokio::io::AsyncReadExt;
 use tokio::sync::RwLock;
 use uuid::Uuid;
+use std::collections::{BTreeSet, HashSet};
+use crate::fs::filetree::FileTree;
 
 /// A *StoredGroup* is a reduced version of a [Group], which can safely be stored in a database.
 /// For documentation on what a DSPFS *Group* is, refer to the documentation of [Group].
@@ -28,7 +30,7 @@ use uuid::Uuid;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StoredGroup {
     pub uuid: Uuid,
-    pub users: Vec<PublicUser>,
+    pub users: BTreeSet<PublicUser>,
     pub location: PathBuf,
 }
 
@@ -39,7 +41,7 @@ impl StoredGroup {
     pub fn new(path: impl AsRef<Path>) -> Self {
         Self {
             uuid: Uuid::new_v4(),
-            users: Vec::new(),
+            users: BTreeSet::new(),
             location: path.as_ref().to_path_buf(),
         }
     }
@@ -52,6 +54,10 @@ impl StoredGroup {
 
     pub fn dspfs_folder(&self) -> PathBuf {
         self.location.join(".dspfs")
+    }
+
+    pub fn dspfs_root(&self) -> &Path {
+        self.location.as_path()
     }
 }
 
@@ -207,6 +213,39 @@ impl<S: Store> Group<S> {
         buffer.truncate(read_bytes);
 
         Ok(Some(buffer))
+    }
+
+    pub async fn list_files(&self) -> Result<Vec<File>> {
+        self.group_store.read().await.list_files()
+    }
+
+    /// Returns all files in the directory pointed to by path, from a certain user.
+    /// This function only returns the files directly in that folder, and not recursively.
+    pub async fn get_files_from_user(&self, user: &PublicUser, path: &Path) -> Result<HashSet<SimpleFile>> {
+        let filetree = self.group_store.read().await.get_filetree(user)?;
+
+        let dir = filetree.find(path)
+            .context("no file exists at this path")?;
+
+        Ok(match dir {
+            FileTree::Leaf { file, .. } => {
+                let mut hs = HashSet::new();
+                hs.insert(file.simplify());
+                hs
+            },
+            FileTree::Node { children, .. } => {
+                children.iter()
+                    .map(|node| match node {
+                        FileTree::Leaf { file, .. } => {
+                            file.simplify()
+                        },
+                        FileTree::Node { .. } => {
+                            todo!()
+                        },
+                    })
+                    .collect()
+            },
+        })
     }
 }
 

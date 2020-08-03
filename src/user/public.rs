@@ -4,7 +4,7 @@ use std::net::IpAddr;
 
 type SymmetricKey = u8;
 
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Ord, PartialOrd)]
 pub struct PublicUser {
     // ed25519 public key
     public_key: PublicKey,

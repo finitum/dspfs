@@ -4,6 +4,7 @@ use crate::user::PublicUser;
 use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use crate::fs::filetree::FileTree;
 
 /// Thread safe group store
 pub type SharedGroupStore = Arc<RwLock<Box<dyn GroupStore>>>;
@@ -23,6 +24,9 @@ pub trait GroupStore: Send + Sync {
 
     /// Gets a specific file given a filehash
     fn get_file(&self, hash: Hash) -> Result<Option<File>>;
+
+    fn list_files(&self) -> Result<Vec<File>>;
+    fn get_filetree(&self, user: &PublicUser) -> Result<FileTree>;
 
     /// Changes a user's file from old to new.
     fn update_file(&mut self, user: &PublicUser, old: &File, new: File) -> Result<()> {
