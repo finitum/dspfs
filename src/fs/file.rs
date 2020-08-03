@@ -71,7 +71,7 @@ impl File {
             path: self.path.clone(),
             hash: self.hash.clone(),
             users: self.users.clone(),
-            file_size: self.file_size.clone(),
+            file_size: self.file_size,
         }
     }
 

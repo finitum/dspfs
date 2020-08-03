@@ -25,7 +25,10 @@ pub trait GroupStore: Send + Sync {
     /// Gets a specific file given a filehash
     fn get_file(&self, hash: Hash) -> Result<Option<File>>;
 
+    /// Gets the list of all files
     fn list_files(&self) -> Result<Vec<File>>;
+
+    /// Gets the file tree of a specific user
     fn get_filetree(&self, user: &PublicUser) -> Result<FileTree>;
 
     /// Changes a user's file from old to new.

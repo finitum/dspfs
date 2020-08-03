@@ -77,7 +77,8 @@ pub trait Api {
     async fn refresh(&self);
 
     // TODO:
-    async fn add_folder(&self, guuid: Uuid, path: &Path) -> Result<()> {
+    async fn add_folder(&self, _guuid: Uuid, path: &Path) -> Result<()> {
+        assert!(path.is_dir());
         todo!()
     }
 }

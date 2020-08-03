@@ -31,11 +31,6 @@ pub struct Dspfs<S> {
     serverhandle: Option<ServerHandle>,
 }
 
-impl<S> Dspfs<S> {
-    pub fn builder() -> DspfsBuilder {
-        DspfsBuilder::new()
-    }
-}
 
 impl<S: Store + 'static> Dspfs<S> {
     pub async fn start(&mut self) {
@@ -72,7 +67,7 @@ impl<S: Store> Api for Dspfs<S> {
         if !group.dspfs_folder().exists() {
             // New folder
             fs::create_dir_all(group.dspfs_folder())?;
-            let uuid = group.uuid.clone();
+            let uuid = group.uuid;
             self.store.write().await.add_group(group)?;
 
             Ok(uuid)
@@ -111,7 +106,7 @@ impl<S: Store> Api for Dspfs<S> {
         Ok(simple_file)
     }
 
-    async fn join_group(&self, guuid: Uuid, bootstrap_user: &PublicUser) -> Result<()> {
+    async fn join_group(&self, _guuid: Uuid, _bootstrap_user: &PublicUser) -> Result<()> {
         unimplemented!("procrastination is life")
     }
 
@@ -154,7 +149,7 @@ impl<S: Store> Api for Dspfs<S> {
         let set = location
             .read_dir()
             .context("Reading directory failed")?
-            .map(|i| i.map(|direntry| LocalFile::from_direntry(direntry)))
+            .map(|i| i.map(LocalFile::from_direntry))
             .flatten()
             .collect::<Result<_>>()?;
 
@@ -175,12 +170,12 @@ impl<S: Store> Api for Dspfs<S> {
             .context("There is no group with this uuid.")?
             .reload(self.store.clone())?;
 
-        let files = group.get_files_from_user(user, path).await;
+        let _files = group.get_files_from_user(user, path).await;
 
         todo!()
     }
 
-    async fn request_file(&self, hash: Hash, to: &Path) -> Result<()> {
+    async fn request_file(&self, _hash: Hash, _to: &Path) -> Result<()> {
         unimplemented!()
     }
 
